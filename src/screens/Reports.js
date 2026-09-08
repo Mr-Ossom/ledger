@@ -40,10 +40,10 @@ export default function ReportsScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    setWeekly(getDailyProfit(7));
-    setMonthly(getDailyProfit(30).slice(-7));
-    setTopCats(getTopCategories());
-    try { const ins = await generateInsight(getTransactions({})); setInsight(ins); } catch {}
+    setWeekly(await getDailyProfit(7));
+    setMonthly((await getDailyProfit(30)).slice(-7));
+    setTopCats(await getTopCategories());
+    try { const ins = await generateInsight(await getTransactions({})); setInsight(ins); } catch {}
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -88,7 +88,7 @@ export default function ReportsScreen() {
       <View style={[styles.card, { backgroundColor: COLORS.navy, borderColor: COLORS.navy }]}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <Text style={[styles.cardTitle, { color: COLORS.gold }]}>✦ {t.insightTitle}</Text>
-          <TouchableOpacity onPress={async () => { setRefreshing(true); const ins = await generateInsight(getTransactions({})); setInsight(ins); setRefreshing(false); }}><Text style={{ color: COLORS.cream, fontWeight: '700', fontSize: 12 }}>{refreshing ? '…' : 'Refresh'}</Text></TouchableOpacity>
+          <TouchableOpacity onPress={async () => { setRefreshing(true); const ins = await generateInsight(await getTransactions({})); setInsight(ins); setRefreshing(false); }}><Text style={{ color: COLORS.cream, fontWeight: '700', fontSize: 12 }}>{refreshing ? '…' : 'Refresh'}</Text></TouchableOpacity>
         </View>
         <Text style={styles.insight}>{insight}</Text>
       </View>

@@ -6,6 +6,8 @@ import ShopSetupScreen from '../screens/ShopSetup';
 import BottomTabNavigator from './BottomTabNavigator';
 import AddSaleScreen from '../screens/AddSale';
 import AddExpenseScreen from '../screens/AddExpense';
+import ProfileScreen from '../screens/Profile';
+import SettingsScreen from '../screens/Settings';
 import { COLORS } from '../constants';
 
 const Stack = createNativeStackNavigator();
@@ -28,6 +30,26 @@ export default function RootNavigator({ initialRoute }) {
       <Stack.Screen name="Main" component={BottomTabNavigator} options={{ headerShown: false }} />
       <Stack.Screen name="AddSale" component={AddSaleScreen} options={{ title: 'Record Sale', presentation: 'modal' }} />
       <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={{ title: 'Record Expense', presentation: 'modal' }} />
+      <Stack.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          title: 'My Profile',
+          presentation: 'modal',
+          headerStyle: { backgroundColor: COLORS.navy },
+          headerTintColor: COLORS.cream,
+        }}
+      />
+      <Stack.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{
+          title: 'Settings',
+          presentation: 'modal',
+          headerStyle: { backgroundColor: COLORS.navy },
+          headerTintColor: COLORS.cream,
+        }}
+      />
     </Stack.Navigator>
   );
 }

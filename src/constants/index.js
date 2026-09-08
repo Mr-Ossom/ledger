@@ -20,6 +20,15 @@ export const STRINGS = {
     getStarted: 'Get Started',
     next: 'Next',
     skip: 'Skip',
+    emailTitle: 'Welcome to CoreLedger',
+    emailSubtitle: 'Sign in with your email to continue',
+    emailPlaceholder: 'e.g. ama@example.com',
+    passwordPlaceholder: 'Password (min 6 chars)',
+    signIn: 'Sign In',
+    signUp: 'Create Account',
+    haveAccount: 'Already have an account? Sign In',
+    noAccount: "Don't have an account? Sign Up",
+    forgotPassword: 'Forgot password?',
     phoneTitle: 'Welcome to Ledger',
     phoneSubtitle: 'Enter your phone number to continue',
     phonePlaceholder: 'e.g. 024 123 4567',
@@ -98,6 +107,15 @@ export const STRINGS = {
     getStarted: 'Hyɛ aseɛ',
     next: 'Edi so',
     skip: 'Twa mu',
+    emailTitle: 'Akwaaba ba CoreLedger',
+    emailSubtitle: 'Fa wo email kɔ mu na yɛnkɔ so',
+    emailPlaceholder: 'sɛ nhwɛso ama@example.com',
+    passwordPlaceholder: 'Password (min 6)',
+    signIn: 'Kɔ Mu',
+    signUp: 'Yɛ Akawunt',
+    haveAccount: 'Wo wɔ akawunt? Kɔ Mu',
+    noAccount: 'Wonni akawunt? Yɛ Foforɔ',
+    forgotPassword: 'Wo werɛ afi password?',
     phoneTitle: 'Akwaaba ba Ledger',
     phoneSubtitle: 'Hyɛ wo fon nɔma mu na yɛnkɔ so',
     phonePlaceholder: 'sɛ nhwɛso 024 123 4567',
@@ -168,7 +186,24 @@ export const STRINGS = {
   },
 };
 
-export const SHOP_CATEGORIES = ['Provisions','Fruits & Vegetables','Cosmetics','Clothing','Food & Drink','Other'];
+export const SHOP_CATEGORIES = [
+  'Provisions',
+  'Fruits & Vegetables',
+  'Food & Drink',
+  'Cosmetics & Beauty',
+  'Clothing & Fashion',
+  'Electronics & Accessories',
+  'Stationery & Books',
+  'Pharmacy & Health',
+  'Hardware & Tools',
+  'Bakery & Confectionery',
+  'Meat, Fish & Poultry',
+  'General Merchandise',
+  'Other',
+];
 export const SALE_CATEGORIES = ['Groceries','Drinks','Snacks','Household','Other'];
 export const EXPENSE_CATEGORIES = ['Restock','Transport','Utilities','Packaging','Staff','Other'];
 export const PAYMENT_METHODS = ['Cash','MoMo','Credit'];
+export const INVENTORY_UNITS = ['pcs','kg','g','L','mL','box','pack','dozen','bag','roll'];
+export const INVENTORY_CATEGORIES = ['Provisions','Drinks','Snacks','Household','Cosmetics','Electronics','Stationery','Clothing','Other'];
+

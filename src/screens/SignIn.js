@@ -2,70 +2,101 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { COLORS, STRINGS } from '../constants';
 import { useAuth } from '../context/AuthContext';
+import { auth, isFirebaseConfigured } from '../lib/firebase';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { getShop } from '../database';
 
 const t = STRINGS.en;
 
 export default function SignInScreen({ navigation }) {
   const { completeLogin } = useAuth();
-  const [step, setStep] = useState('phone');
-  const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
-  const [sending, setSending] = useState(false);
-  const [verifying, setVerifying] = useState(false);
-  const [countdown, setCountdown] = useState(0);
+  const [mode, setMode] = useState('signIn');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const startCountdown = () => {
-    setCountdown(60);
-    const id = setInterval(() => {
-      setCountdown(c => { if (c <= 1) { clearInterval(id); return 0; } return c - 1; });
-    }, 1000);
+  const isValid = email.includes('@') && password.length >= 6 && (mode === 'signIn' || password === confirmPassword);
+
+  const handleAuth = async () => {
+    if (!isValid) {
+      if (mode === 'signUp' && password !== confirmPassword) { Alert.alert('Passwords do not match'); return; }
+      Alert.alert('Enter valid email and password (min 6)'); return;
+    }
+    if (mode === 'signUp' && password !== confirmPassword) { Alert.alert('Passwords do not match', 'Confirm password must match password'); return; }
+    if (!isFirebaseConfigured() || !auth) {
+      setLoading(true);
+      setTimeout(async () => {
+        await completeLogin();
+        setLoading(false);
+        if (mode === 'signUp') {
+          navigation.replace('ShopSetup');
+        } else {
+          const shop = await getShop();
+          if (shop && shop.id) navigation.replace('Main');
+          else navigation.replace('ShopSetup');
+        }
+      }, 600);
+      return;
+    }
+    setLoading(true);
+    try {
+      if (mode === 'signUp') {
+        await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
+        await completeLogin();
+        navigation.replace('ShopSetup');
+      } else {
+        await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
+        await completeLogin();
+        const shop = await getShop();
+        if (shop && shop.id) {
+          navigation.replace('Main');
+        } else {
+          navigation.replace('ShopSetup');
+        }
+      }
+    } catch (e) {
+      let msg = e.message;
+      if (e.code === 'auth/email-already-in-use') msg = 'Email already in use. Try Sign In.';
+      if (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password') msg = 'Wrong email or password.';
+      if (e.code === 'auth/user-not-found') msg = 'No account found. Create one.';
+      Alert.alert(mode === 'signUp' ? 'Sign Up failed' : 'Sign In failed', msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const sendOtp = async () => {
-    const digits = phone.replace(/\D/g, '');
-    if (digits.length < 9) { Alert.alert('Enter a valid phone number'); return; }
-    setSending(true);
-    setTimeout(() => { setSending(false); setStep('otp'); startCountdown(); }, 600);
-  };
-
-  const verify = async () => {
-    if (otp.length < 4) { Alert.alert('Enter 4-digit code'); return; }
-    setVerifying(true);
-    await completeLogin();
-    setVerifying(false);
-    navigation.replace('ShopSetup', { phone });
-  };
-
-  const resend = async () => {
-    if (countdown > 0) return;
-    await sendOtp();
+  const forgot = async () => {
+    if (!email.includes('@')) { Alert.alert('Enter your email first'); return; }
+    if (!isFirebaseConfigured() || !auth) { Alert.alert('Demo mode', 'Password reset needs Firebase config'); return; }
+    try { await sendPasswordResetEmail(auth, email.trim().toLowerCase()); Alert.alert('Check your email', 'Password reset link sent.'); } catch (e) { Alert.alert('Failed', e.message); }
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.card}>
         <View style={styles.badge}><Text style={styles.badgeText}>₵</Text></View>
-        <Text style={styles.title}>{step === 'phone' ? t.phoneTitle : t.otpTitle}</Text>
-        <Text style={styles.subtitle}>{step === 'phone' ? t.phoneSubtitle : t.otpSubtitle}</Text>
+        <Text style={styles.title}>{mode === 'signUp' ? t.signUp : t.emailTitle}</Text>
+        <Text style={styles.subtitle}>{t.emailSubtitle}</Text>
 
-        {step === 'phone' ? (
+        <TextInput value={email} onChangeText={setEmail} placeholder={t.emailPlaceholder} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={styles.input} placeholderTextColor={COLORS.muted} />
+        <TextInput value={password} onChangeText={setPassword} placeholder={t.passwordPlaceholder} secureTextEntry style={styles.input} placeholderTextColor={COLORS.muted} />
+        {mode === 'signUp' && (
           <>
-            <View style={styles.inputRow}>
-              <Text style={styles.prefix}>+233</Text>
-              <TextInput value={phone} onChangeText={setPhone} placeholder={t.phonePlaceholder} keyboardType="phone-pad" style={styles.input} placeholderTextColor={COLORS.muted} />
-            </View>
-            <TouchableOpacity style={[styles.primary, sending && styles.disabled]} onPress={sendOtp} disabled={sending}><Text style={styles.primaryText}>{sending ? 'Sending…' : t.sendOTP}</Text></TouchableOpacity>
-            <Text style={styles.note}>Demo: any code works. BMS coming soon.</Text>
-          </>
-        ) : (
-          <>
-            <TextInput value={otp} onChangeText={setOtp} placeholder="••••" keyboardType="number-pad" maxLength={6} style={styles.otpInput} placeholderTextColor={COLORS.muted} />
-            <Text style={styles.phoneHint}>Code sent to +233 {phone}</Text>
-            <TouchableOpacity style={[styles.primary, verifying && styles.disabled]} onPress={verify} disabled={verifying}><Text style={styles.primaryText}>{verifying ? 'Verifying…' : t.verify}</Text></TouchableOpacity>
-            <TouchableOpacity onPress={resend} disabled={countdown>0} style={styles.link}><Text style={[styles.linkText, countdown>0 && styles.linkDisabled]}>{countdown>0 ? `Resend in ${countdown}s` : `${t.resend}`}</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => setStep('phone')} style={styles.link}><Text style={styles.linkText}>Change number</Text></TouchableOpacity>
+            <TextInput value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Confirm password" secureTextEntry style={[styles.input, confirmPassword.length > 0 && password !== confirmPassword && styles.inputError]} placeholderTextColor={COLORS.muted} />
+            {confirmPassword.length > 0 && password !== confirmPassword && <Text style={styles.error}>Passwords do not match</Text>}
           </>
         )}
+
+        <TouchableOpacity style={[styles.primary, (!isValid || loading) && styles.disabled]} onPress={handleAuth} disabled={!isValid || loading}><Text style={styles.primaryText}>{loading ? 'Please wait…' : mode === 'signUp' ? t.signUp : t.signIn}</Text></TouchableOpacity>
+
+        <TouchableOpacity onPress={forgot} style={styles.link}><Text style={styles.linkText}>{t.forgotPassword}</Text></TouchableOpacity>
+
+        <View style={styles.divider} />
+        <TouchableOpacity onPress={() => setMode(mode === 'signIn' ? 'signUp' : 'signIn')} style={styles.link}>
+          <Text style={styles.linkText}>{mode === 'signIn' ? t.noAccount : t.haveAccount}</Text>
+        </TouchableOpacity>
+        {!isFirebaseConfigured() && <Text style={styles.note}>Demo: any email/password works (no Firebase config)</Text>}
       </View>
     </ScrollView>
   );
@@ -78,16 +109,14 @@ const styles = StyleSheet.create({
   badgeText: { color: COLORS.gold, fontSize: 26, fontWeight: '900' },
   title: { fontSize: 22, fontWeight: '900', color: COLORS.navy, textAlign: 'center' },
   subtitle: { fontSize: 14, color: COLORS.muted, textAlign: 'center', marginTop: 6, marginBottom: 24 },
-  inputRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, paddingHorizontal: 14, height: 56, backgroundColor: COLORS.white, marginBottom: 16 },
-  prefix: { fontWeight: '800', color: COLORS.navy, marginRight: 10 },
-  input: { flex: 1, fontSize: 16, color: COLORS.navy },
-  otpInput: { borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, height: 56, textAlign: 'center', fontSize: 22, letterSpacing: 12, fontWeight: '800', color: COLORS.navy, marginBottom: 10 },
-  phoneHint: { textAlign: 'center', color: COLORS.muted, marginBottom: 16 },
-  primary: { backgroundColor: COLORS.gold, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  input: { borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, height: 52, paddingHorizontal: 14, fontSize: 15, color: COLORS.navy, backgroundColor: COLORS.white, marginBottom: 12 },
+  inputError: { borderColor: COLORS.rust },
+  error: { color: COLORS.rust, fontSize: 11, marginBottom: 8, fontWeight: '600' },
+  primary: { backgroundColor: COLORS.gold, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   disabled: { opacity: 0.6 },
   primaryText: { color: COLORS.navy, fontWeight: '800', fontSize: 16 },
-  note: { textAlign: 'center', color: COLORS.muted, fontSize: 12, marginTop: 12 },
-  link: { alignItems: 'center', padding: 14 },
+  divider: { height: 1, backgroundColor: COLORS.lightGray, marginVertical: 12 },
+  link: { alignItems: 'center', padding: 10 },
   linkText: { color: COLORS.navy, fontWeight: '600' },
-  linkDisabled: { color: COLORS.muted },
+  note: { textAlign: 'center', color: COLORS.muted, fontSize: 11, marginTop: 8 },
 });

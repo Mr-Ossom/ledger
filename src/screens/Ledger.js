@@ -22,8 +22,9 @@ export default function LedgerScreen() {
   const [dateFilter, setDateFilter] = useState('all');
   const [txs, setTxs] = useState([]);
 
-  const load = useCallback(() => {
-    setTxs(getTransactions({ type, search, dateFilter: dateFilter === 'all' ? undefined : dateFilter }));
+  const load = useCallback(async () => {
+    const data = await getTransactions({ type, search, dateFilter: dateFilter === 'all' ? undefined : dateFilter });
+    setTxs(data);
   }, [type, search, dateFilter]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));

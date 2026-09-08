@@ -19,11 +19,11 @@ export default function HomeScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    const s = getShop();
+    const s = await getShop();
     setShop(s);
-    const tot = getTodayTotals();
+    const tot = await getTodayTotals();
     setTotals(tot);
-    const tx = getTransactions({});
+    const tx = await getTransactions({});
     setRecent(tx.slice(0, 5));
     try {
       const target = s?.daily_target || 500;

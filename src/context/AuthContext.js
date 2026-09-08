@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { getHasOnboarded, setHasOnboarded, clearHasOnboarded } from '../utils/storage';
-import { getShop, clearAll } from '../database';
+import { getHasOnboarded, setHasOnboarded } from '../utils/storage';
+import { auth, isFirebaseConfigured } from '../lib/firebase';
+import { onAuthStateChanged, signOut as fbSignOut } from 'firebase/auth';
 
 const AuthContext = createContext(null);
 
@@ -8,47 +9,44 @@ export function AuthProvider({ children }) {
   const [hasCompletedOnboarding, setHasCompletedOnboardingState] = useState(false);
   const [hasOnboarded, setHasOnboardedState] = useState(false);
   const [ready, setReady] = useState(false);
-  const [shop, setShop] = useState(null);
+  const [user, setUser] = useState(null);
 
   const refresh = useCallback(async () => {
     const flag = await getHasOnboarded();
-    let s = null;
-    try { s = getShop(); } catch {}
-    if (s && s.id) {
-      setHasCompletedOnboardingState(true);
-      setHasOnboardedState(true);
-      setShop(s);
-    } else {
-      setHasCompletedOnboardingState(flag);
-      setHasOnboardedState(flag);
-      setShop(null);
+    setHasCompletedOnboardingState(flag);
+    setHasOnboardedState(flag);
+    if (isFirebaseConfigured() && auth) {
+      const u = auth.currentUser;
+      setUser(u || null);
     }
   }, []);
 
-  useEffect(() => { refresh().finally(() => setReady(true)); }, [refresh]);
+  useEffect(() => {
+    refresh().finally(() => setReady(true));
+    if (!isFirebaseConfigured() || !auth) return;
+    const unsub = onAuthStateChanged(auth, (u) => setUser(u || null));
+    return () => unsub();
+  }, [refresh]);
 
   const completeOnboarding = useCallback(async () => {
     await setHasOnboarded(true);
     setHasCompletedOnboardingState(true);
     setHasOnboardedState(true);
-    try { setShop(getShop()); } catch {}
   }, []);
 
   const completeLogin = useCallback(async () => {
     await setHasOnboarded(true);
-    setHasCompletedOnboardingState(true);
     setHasOnboardedState(true);
-    try { setShop(getShop()); } catch {}
+    setHasCompletedOnboardingState(true);
   }, []);
 
   const signOut = useCallback(async () => {
-    try { clearAll(); } catch {}
-    setShop(null);
-    setHasOnboardedState(false);
+    if (isFirebaseConfigured() && auth) try { await fbSignOut(auth); } catch {}
+    setUser(null);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ hasCompletedOnboarding, hasOnboarded, ready, shop, refresh, completeOnboarding, completeLogin, signOut }}>
+    <AuthContext.Provider value={{ hasCompletedOnboarding, hasOnboarded, ready, user, refresh, completeOnboarding, completeLogin, signOut }}>
       {children}
     </AuthContext.Provider>
   );

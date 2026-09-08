@@ -12,18 +12,21 @@ export default function ShopSetupScreen({ navigation, route }) {
   const [name, setName] = useState("Ama's Provisions");
   const [category, setCategory] = useState('Provisions');
   const [dailyTarget, setDailyTarget] = useState('500');
-  const phone = route.params?.phone || '0240000000';
+  const [phone, setPhone] = useState(route.params?.phone || '');
   const targetVal = parseFloat(dailyTarget);
-  const isValid = !isNaN(targetVal) && targetVal > 0;
+  const isValid = !isNaN(targetVal) && targetVal > 0 && name.trim().length > 0;
 
   const save = async () => {
     if (!name.trim()) { Alert.alert('Shop name required'); return; }
     if (!isValid) { Alert.alert(t.dailyTargetRequired); return; }
-    clearAll();
-    initDatabase();
-    updateShop({ name: name.trim(), category, phone, daily_target: targetVal });
-    await completeOnboarding();
-    navigation.replace('Main');
+    try {
+      await initDatabase();
+      await updateShop({ name: name.trim(), category, phone, daily_target: targetVal });
+      await completeOnboarding();
+      navigation.replace('Main');
+    } catch (err) {
+      Alert.alert('Firebase Error', err?.message || 'Failed to save shop to database. Please check your Firestore rules in Firebase Console.');
+    }
   };
 
   return (
@@ -37,8 +40,14 @@ export default function ShopSetupScreen({ navigation, route }) {
 
         <Text style={styles.label}>{t.shopCategory}</Text>
         <View style={styles.pickerWrap}>
-          <Picker selectedValue={category} onValueChange={setCategory} style={styles.picker}>
-            {SHOP_CATEGORIES.map(c => <Picker.Item key={c} label={c} value={c} />)}
+          <Picker
+            selectedValue={category}
+            onValueChange={setCategory}
+            style={[styles.picker, { color: COLORS.navy }]}
+            itemStyle={{ color: COLORS.navy, fontSize: 15 }}
+            dropdownIconColor={COLORS.navy}
+          >
+            {SHOP_CATEGORIES.map(c => <Picker.Item key={c} label={c} value={c} color={COLORS.navy} />)}
           </Picker>
         </View>
 
@@ -46,10 +55,8 @@ export default function ShopSetupScreen({ navigation, route }) {
         <TextInput value={dailyTarget} onChangeText={setDailyTarget} placeholder={t.dailyTargetPlaceholder} keyboardType="decimal-pad" style={[styles.input, { fontFamily: 'monospace' }, !isValid && dailyTarget.length > 0 && styles.inputError]} placeholderTextColor={COLORS.muted} />
         {!isValid && dailyTarget.length > 0 ? <Text style={styles.error}>{t.dailyTargetRequired}</Text> : <Text style={styles.hint}>{t.dailyTargetRequired}</Text>}
 
-        <View style={styles.phoneBox}>
-          <Text style={styles.phoneLabel}>{t.phone}</Text>
-          <Text style={styles.phoneValue}>+233 {phone}</Text>
-        </View>
+        <Text style={styles.label}>{t.phone}</Text>
+        <TextInput value={phone} onChangeText={setPhone} placeholder="024 123 4567" keyboardType="phone-pad" style={styles.input} placeholderTextColor={COLORS.muted} />
 
         <TouchableOpacity style={[styles.primary, !isValid && styles.primaryDisabled]} onPress={save} disabled={!isValid}><Text style={styles.primaryText}>{t.saveAndContinue}</Text></TouchableOpacity>
         {!isValid && <Text style={styles.disabledHint}>Enter a target &gt; 0 to continue</Text>}
@@ -69,7 +76,7 @@ const styles = StyleSheet.create({
   error: { color: COLORS.rust, fontSize: 11, marginTop: 6, fontWeight: '600' },
   hint: { color: COLORS.muted, fontSize: 11, marginTop: 6 },
   pickerWrap: { borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, overflow: 'hidden', backgroundColor: COLORS.white },
-  picker: { height: 52 },
+  picker: { height: 52, color: COLORS.navy },
   phoneBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: COLORS.cream, borderRadius: 12, padding: 14, marginTop: 16, marginBottom: 18 },
   phoneLabel: { color: COLORS.muted, fontWeight: '600' },
   phoneValue: { color: COLORS.navy, fontWeight: '800', fontFamily: 'monospace' },

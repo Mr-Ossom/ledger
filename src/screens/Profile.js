@@ -21,10 +21,10 @@ export default function ProfileScreen({ navigation }) {
   const isValid = !isNaN(targetVal) && targetVal > 0;
 
   const load = useCallback(async () => {
-    const s = getShop();
+    const s = await getShop();
     if (s) { setName(s.name); setCategory(s.category); setPhone(s.phone); setDailyTarget(String(s.daily_target || 500)); }
     const target = s?.daily_target || parseFloat(dailyTarget) || 500;
-    const week = getDailyProfit(7);
+    const week = await getDailyProfit(7);
     const totalSales = week.reduce((a, d) => a + d.sales, 0);
     const avg = totalSales / 7;
     const pct = target > 0 ? ((avg - target) / target) * 100 : 0;
@@ -34,7 +34,7 @@ export default function ProfileScreen({ navigation }) {
     else fallback = `You're averaging GHS ${avg.toFixed(0)}/day this week. You're ${Math.abs(pct).toFixed(0)}% below target — push your best seller before close to catch up.`;
     setHealth({ avg, pct, text: fallback });
     try {
-      const tx = getTransactions({});
+      const tx = await getTransactions({});
       const ai = await generateInsight(tx, { target, todayIncome: avg });
       if (ai && ai.length > 10) {
         const short = ai.split('.').slice(0, 2).join('.').trim();
@@ -48,15 +48,19 @@ export default function ProfileScreen({ navigation }) {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const save = () => {
+  const save = async () => {
     if (!isValid) { Alert.alert(t.dailyTargetRequired); return; }
-    updateShop({ name: name.trim() || 'My Shop', category, phone, daily_target: targetVal });
-    Alert.alert('Saved', 'Shop info updated');
-    load();
+    try {
+      await updateShop({ name: name.trim() || 'My Shop', category, phone, daily_target: targetVal });
+      Alert.alert('Saved', 'Shop info updated');
+      load();
+    } catch (err) {
+      Alert.alert('Save Failed', err?.message || 'Could not update shop');
+    }
   };
 
   const exportCSV = async () => {
-    const txs = getTransactions({});
+    const txs = await getTransactions({});
     const csv = toCSV(txs);
     try { await Share.share({ message: csv, title: 'Ledger Export' }); } catch { Alert.alert(t.exported, csv.slice(0, 400) + '...'); }
   };
@@ -74,7 +78,7 @@ export default function ProfileScreen({ navigation }) {
         <Text style={styles.label}>{t.shopName}</Text>
         <TextInput value={name} onChangeText={setName} style={styles.input} placeholderTextColor={COLORS.muted} />
         <Text style={styles.label}>{t.shopCategory}</Text>
-        <View style={styles.pickerWrap}><Picker selectedValue={category} onValueChange={setCategory}>{SHOP_CATEGORIES.map(c => <Picker.Item key={c} label={c} value={c} />)}</Picker></View>
+        <View style={styles.pickerWrap}><Picker selectedValue={category} onValueChange={setCategory} style={{ color: COLORS.navy }} itemStyle={{ color: COLORS.navy }} dropdownIconColor={COLORS.navy}>{SHOP_CATEGORIES.map(c => <Picker.Item key={c} label={c} value={c} color={COLORS.navy} />)}</Picker></View>
         <Text style={styles.label}>{t.phone}</Text>
         <TextInput value={phone} onChangeText={setPhone} keyboardType="phone-pad" style={styles.input} />
         <Text style={styles.label}>{t.dailyTarget}</Text>

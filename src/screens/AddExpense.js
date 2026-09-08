@@ -19,8 +19,12 @@ export default function AddExpenseScreen({ navigation }) {
     const val = parseFloat(amount);
     if (!val || val <= 0) { Alert.alert('Enter a valid amount'); return; }
     if (!description.trim()) { Alert.alert('Enter a description'); return; }
-    addTransaction({ type: 'expense', amount: val, description: description.trim(), category, payment_method: null, is_credit: 0 });
-    navigation.goBack();
+    try {
+      await addTransaction({ type: 'expense', amount: val, description: description.trim(), category, payment_method: null, is_credit: 0 });
+      navigation.goBack();
+    } catch (err) {
+      Alert.alert('Save Failed', err?.message || 'Could not save expense. Please check your network and Firebase rules.');
+    }
   };
 
   const handleVoice = async () => {
@@ -67,7 +71,7 @@ export default function AddExpenseScreen({ navigation }) {
         <TouchableOpacity onPress={async () => { setParsing(true); const p = await parseTransactionText(description); if (p.amount) setAmount(String(p.amount)); if (p.category) setCategory(p.category); setParsing(false); }} style={styles.parseLink}><Text style={styles.parseLinkText}>{parsing ? 'Parsing…' : '✦ Parse with AI'}</Text></TouchableOpacity>
 
         <Text style={styles.labelDark}>{t.category}</Text>
-        <View style={styles.pickerWrap}><Picker selectedValue={category} onValueChange={setCategory}>{EXPENSE_CATEGORIES.map(c => <Picker.Item key={c} label={c} value={c} />)}</Picker></View>
+        <View style={styles.pickerWrap}><Picker selectedValue={category} onValueChange={setCategory} style={{ color: COLORS.navy }} itemStyle={{ color: COLORS.navy }} dropdownIconColor={COLORS.navy}>{EXPENSE_CATEGORIES.map(c => <Picker.Item key={c} label={c} value={c} color={COLORS.navy} />)}</Picker></View>
 
         <TouchableOpacity style={[styles.mic, recording && styles.micActive]} onPress={handleVoice}>
           <Text style={styles.micText}>{recording ? '● Recording… tap to stop' : '🎙️ Tap to speak: “30 for transport fare”'}</Text>
