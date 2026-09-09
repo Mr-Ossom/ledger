@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, FlatList } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import Select from '../components/Select';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, STRINGS, SALE_CATEGORIES, PAYMENT_METHODS } from '../constants';
 import { addTransaction, getInventory } from '../database';
@@ -165,7 +165,7 @@ export default function AddSaleScreen({ navigation }) {
         <TouchableOpacity onPress={onFreeText} style={styles.parseLink}><Text style={styles.parseLinkText}>{parsing ? 'Parsing…' : '✦ Parse with AI'}</Text></TouchableOpacity>
 
         <Text style={styles.label}>{t.category}</Text>
-        <View style={styles.pickerWrap}><Picker selectedValue={category} onValueChange={setCategory} style={{ color: COLORS.navy }} itemStyle={{ color: COLORS.navy }} dropdownIconColor={COLORS.navy}>{SALE_CATEGORIES.map(c => <Picker.Item key={c} label={c} value={c} color={COLORS.navy} />)}</Picker></View>
+        <Select value={category} onChange={setCategory} options={SALE_CATEGORIES} title={t.category} />
 
         <Text style={styles.label}>{t.paymentMethod}</Text>
         <View style={styles.segment}>
@@ -240,7 +240,6 @@ const styles = StyleSheet.create({
   amountInput: { flex: 1, backgroundColor: COLORS.white, borderRadius: 12, height: 56, paddingHorizontal: 14, fontSize: 22, fontWeight: '900', color: COLORS.navy, fontFamily: 'monospace' },
   card: { backgroundColor: COLORS.white, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: COLORS.lightGray },
   input: { height: 52, borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, paddingHorizontal: 14, fontSize: 15, color: COLORS.navy, backgroundColor: COLORS.white },
-  pickerWrap: { borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, overflow: 'hidden', backgroundColor: COLORS.white },
   segment: { flexDirection: 'row', gap: 8 },
   segBtn: { flex: 1, height: 44, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.navy, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.white },
   segActive: { backgroundColor: COLORS.navy },

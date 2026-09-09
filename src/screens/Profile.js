@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Share } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import Select from '../components/Select';
 import { useFocusEffect } from '@react-navigation/native';
 import { COLORS, STRINGS, SHOP_CATEGORIES } from '../constants';
 import { getShop, updateShop, getTransactions, getDailyProfit } from '../database';
@@ -19,6 +19,7 @@ export default function ProfileScreen({ navigation }) {
   const [health, setHealth] = useState({ avg: 0, pct: 0, text: t.insightFallback });
   const targetVal = parseFloat(dailyTarget);
   const isValid = !isNaN(targetVal) && targetVal > 0;
+  const canSave = name.trim().length > 0;
 
   const load = useCallback(async () => {
     const s = await getShop();
@@ -49,9 +50,9 @@ export default function ProfileScreen({ navigation }) {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const save = async () => {
-    if (!isValid) { Alert.alert(t.dailyTargetRequired); return; }
+    if (!canSave) { Alert.alert('Shop name required'); return; }
     try {
-      await updateShop({ name: name.trim() || 'My Shop', category, phone, daily_target: targetVal });
+      await updateShop({ name: name.trim() || 'My Shop', category, phone, daily_target: isValid ? targetVal : 500 });
       Alert.alert('Saved', 'Shop info updated');
       load();
     } catch (err) {
@@ -78,13 +79,13 @@ export default function ProfileScreen({ navigation }) {
         <Text style={styles.label}>{t.shopName}</Text>
         <TextInput value={name} onChangeText={setName} style={styles.input} placeholderTextColor={COLORS.muted} />
         <Text style={styles.label}>{t.shopCategory}</Text>
-        <View style={styles.pickerWrap}><Picker selectedValue={category} onValueChange={setCategory} style={{ color: COLORS.navy }} itemStyle={{ color: COLORS.navy }} dropdownIconColor={COLORS.navy}>{SHOP_CATEGORIES.map(c => <Picker.Item key={c} label={c} value={c} color={COLORS.navy} />)}</Picker></View>
+        <Select value={category} onChange={setCategory} options={SHOP_CATEGORIES} title={t.shopCategory} />
         <Text style={styles.label}>{t.phone}</Text>
         <TextInput value={phone} onChangeText={setPhone} keyboardType="phone-pad" style={styles.input} />
         <Text style={styles.label}>{t.dailyTarget}</Text>
         <TextInput value={dailyTarget} onChangeText={setDailyTarget} keyboardType="decimal-pad" style={[styles.input, { fontFamily: 'monospace' }, !isValid && dailyTarget.length > 0 && styles.inputError]} />
-        {!isValid ? <Text style={styles.error}>{t.dailyTargetRequired}</Text> : <Text style={styles.hint}>AI coaches you when income is below this — required.</Text>}
-        <TouchableOpacity style={[styles.primary, !isValid && styles.primaryDisabled]} onPress={save} disabled={!isValid}><Text style={styles.primaryText}>{t.save} • {t.edit}</Text></TouchableOpacity>
+        {!isValid && dailyTarget.length > 0 ? <Text style={styles.error}>Enter a number greater than 0, or leave blank to use GHS 500</Text> : <Text style={styles.hint}>AI coaches you when income is below this — defaults to GHS 500.</Text>}
+        <TouchableOpacity style={[styles.primary, !canSave && styles.primaryDisabled]} onPress={save} disabled={!canSave}><Text style={styles.primaryText}>{t.save} • {t.edit}</Text></TouchableOpacity>
       </View>
 
       <View style={styles.card}>
@@ -128,7 +129,6 @@ const styles = StyleSheet.create({
   input: { height: 48, borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, paddingHorizontal: 12, color: COLORS.navy, backgroundColor: COLORS.white },
   inputError: { borderColor: COLORS.rust },
   error: { color: COLORS.rust, fontSize: 11, marginTop: 6, fontWeight: '600' },
-  pickerWrap: { borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, overflow: 'hidden', backgroundColor: COLORS.white },
   primary: { backgroundColor: COLORS.gold, height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
   primaryDisabled: { backgroundColor: COLORS.lightGray, opacity: 0.6 },
   primaryText: { color: COLORS.navy, fontWeight: '900' },

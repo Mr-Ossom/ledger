@@ -65,11 +65,17 @@ export default function App() {
     try { initDatabase(); } catch (e) { console.log('DB init failed', e); }
     setDbReady(true);
   }, []);
+
+  // Splash renders alone (not stacked with Root) so there's no overlay
+  // positioning to get wrong — only one screen is ever mounted at a time.
+  if (!splashDone) {
+    return <SplashScreen onFinish={() => setSplashDone(true)} />;
+  }
+
   return (
     <SafeAreaProvider>
       <AuthProvider>
         {dbReady && <Root />}
-        {!splashDone && <SplashScreen onFinish={() => setSplashDone(true)} />}
       </AuthProvider>
     </SafeAreaProvider>
   );

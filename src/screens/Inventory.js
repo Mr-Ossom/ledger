@@ -3,7 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, FlatList, Modal, Alert, ActivityIndicator,
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import Select from '../components/Select';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, INVENTORY_UNITS, INVENTORY_CATEGORIES } from '../constants';
@@ -224,16 +224,12 @@ export default function InventoryScreen() {
 
           <View style={styles.formGroup}>
             <Text style={styles.label}>CATEGORY</Text>
-            <View style={styles.pickerWrap}>
-              <Picker
-                selectedValue={form.category}
-                onValueChange={v => setForm(f => ({ ...f, category: v }))}
-                style={{ color: COLORS.navy }}
-                dropdownIconColor={COLORS.navy}
-              >
-                {INVENTORY_CATEGORIES.map(c => <Picker.Item key={c} label={c} value={c} color={COLORS.navy} />)}
-              </Picker>
-            </View>
+            <Select
+              value={form.category}
+              onChange={v => setForm(f => ({ ...f, category: v }))}
+              options={INVENTORY_CATEGORIES}
+              title="Category"
+            />
           </View>
 
           <View style={styles.row2}>
@@ -250,16 +246,12 @@ export default function InventoryScreen() {
             </View>
             <View style={[styles.formGroup, { flex: 1 }]}>
               <Text style={styles.label}>UNIT</Text>
-              <View style={styles.pickerWrap}>
-                <Picker
-                  selectedValue={form.unit}
-                  onValueChange={v => setForm(f => ({ ...f, unit: v }))}
-                  style={{ color: COLORS.navy }}
-                  dropdownIconColor={COLORS.navy}
-                >
-                  {INVENTORY_UNITS.map(u => <Picker.Item key={u} label={u} value={u} color={COLORS.navy} />)}
-                </Picker>
-              </View>
+              <Select
+                value={form.unit}
+                onChange={v => setForm(f => ({ ...f, unit: v }))}
+                options={INVENTORY_UNITS}
+                title="Unit"
+              />
             </View>
           </View>
 
@@ -395,7 +387,6 @@ const styles = StyleSheet.create({
     height: 50, borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12,
     paddingHorizontal: 14, fontSize: 15, color: COLORS.navy, backgroundColor: COLORS.white,
   },
-  pickerWrap: { borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, overflow: 'hidden', backgroundColor: COLORS.white },
   hint: { color: COLORS.muted, fontSize: 11, marginTop: 6 },
   marginBadge: {
     backgroundColor: COLORS.teal, borderRadius: 10, padding: 10, marginBottom: 14, alignItems: 'center',

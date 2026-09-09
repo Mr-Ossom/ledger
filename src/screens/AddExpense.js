@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import Select from '../components/Select';
 import { COLORS, STRINGS, EXPENSE_CATEGORIES } from '../constants';
 import { addTransaction } from '../database';
 import { parseTransactionText } from '../utils/claude';
@@ -71,7 +71,7 @@ export default function AddExpenseScreen({ navigation }) {
         <TouchableOpacity onPress={async () => { setParsing(true); const p = await parseTransactionText(description); if (p.amount) setAmount(String(p.amount)); if (p.category) setCategory(p.category); setParsing(false); }} style={styles.parseLink}><Text style={styles.parseLinkText}>{parsing ? 'Parsing…' : '✦ Parse with AI'}</Text></TouchableOpacity>
 
         <Text style={styles.labelDark}>{t.category}</Text>
-        <View style={styles.pickerWrap}><Picker selectedValue={category} onValueChange={setCategory} style={{ color: COLORS.navy }} itemStyle={{ color: COLORS.navy }} dropdownIconColor={COLORS.navy}>{EXPENSE_CATEGORIES.map(c => <Picker.Item key={c} label={c} value={c} color={COLORS.navy} />)}</Picker></View>
+        <Select value={category} onChange={setCategory} options={EXPENSE_CATEGORIES} title={t.category} />
 
         <TouchableOpacity style={[styles.mic, recording && styles.micActive]} onPress={handleVoice}>
           <Text style={styles.micText}>{recording ? '● Recording… tap to stop' : '🎙️ Tap to speak: “30 for transport fare”'}</Text>
@@ -94,7 +94,6 @@ const styles = StyleSheet.create({
   amountInput: { flex: 1, backgroundColor: COLORS.white, borderRadius: 12, height: 56, paddingHorizontal: 14, fontSize: 22, fontWeight: '900', color: COLORS.navy, fontFamily: 'monospace' },
   card: { backgroundColor: COLORS.white, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: COLORS.lightGray },
   input: { height: 52, borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, paddingHorizontal: 14, fontSize: 15, color: COLORS.navy, backgroundColor: COLORS.white },
-  pickerWrap: { borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, overflow: 'hidden', backgroundColor: COLORS.white },
   parseLink: { alignSelf: 'flex-end', paddingVertical: 6 },
   parseLinkText: { color: COLORS.teal, fontWeight: '700', fontSize: 12 },
   mic: { marginTop: 14, backgroundColor: COLORS.cream, borderWidth: 1, borderColor: COLORS.lightGray, borderRadius: 12, padding: 14, alignItems: 'center' },

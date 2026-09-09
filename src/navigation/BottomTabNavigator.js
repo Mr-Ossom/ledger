@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Platform, TouchableOpacity, Alert, Modal, TouchableWithoutFeedback } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, TouchableWithoutFeedback } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useHeaderHeight } from '@react-navigation/elements';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from '../screens/Home';
 import LedgerScreen from '../screens/Ledger';
@@ -28,7 +30,7 @@ function TabIcon({ label, focused }) {
         size={24}
         color={focused ? COLORS.navy : COLORS.muted}
       />
-      <Text style={[styles.label, focused && styles.labelActive]}>
+      <Text style={[styles.label, focused && styles.labelActive]} numberOfLines={1} allowFontScaling={false}>
         {label}
       </Text>
       {focused && <View style={styles.dot} />}
@@ -51,6 +53,7 @@ function AddTabIcon({ focused }) {
  */
 function MenuDropdown({ navigation }) {
   const { signOut } = useAuth();
+  const headerHeight = useHeaderHeight();
   const [visible, setVisible] = useState(false);
 
   const close = () => setVisible(false);
@@ -113,7 +116,7 @@ function MenuDropdown({ navigation }) {
         <TouchableWithoutFeedback onPress={close}>
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
-              <View style={styles.menuCard}>
+              <View style={[styles.menuCard, { top: headerHeight + 6 }]}>
                 {/* Profile Item */}
                 <TouchableOpacity style={[styles.menuItem, styles.menuItemActive]} onPress={handleProfile} activeOpacity={0.7}>
                   <View style={styles.activeBar} />
@@ -168,7 +171,6 @@ const styles = StyleSheet.create({
   },
   menuCard: {
     position: 'absolute',
-    top: Platform.OS === 'ios' ? 102 : 68,
     right: 16,
     width: 220,
     backgroundColor: COLORS.navy,
@@ -220,7 +222,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 3,
-    paddingTop: 6,
   },
   label: {
     fontSize: 10,
@@ -264,6 +265,12 @@ const styles = StyleSheet.create({
 
 export default function BottomTabNavigator({ navigation }) {
   const menuRight = () => <MenuDropdown navigation={navigation} />;
+  const insets = useSafeAreaInsets();
+  // Reserve exactly the device's own home-indicator/gesture-bar inset, plus a
+  // small fixed buffer — a hardcoded per-platform value clips or floats on
+  // devices whose safe area differs (Dynamic Island, gesture nav, etc).
+  const tabBarBottomPadding = insets.bottom + 8;
+  const tabBarHeight = 52 + tabBarBottomPadding;
 
   return (
     <Tab.Navigator
@@ -280,9 +287,9 @@ export default function BottomTabNavigator({ navigation }) {
         tabBarStyle: {
           backgroundColor: '#FFFFFF',
           borderTopWidth: 0,
-          height: Platform.OS === 'ios' ? 86 : 70,
-          paddingBottom: Platform.OS === 'ios' ? 22 : 8,
-          paddingTop: 4,
+          height: tabBarHeight,
+          paddingBottom: tabBarBottomPadding,
+          paddingTop: 8,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.08,

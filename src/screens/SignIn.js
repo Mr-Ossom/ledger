@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { COLORS, STRINGS } from '../constants';
 import { useAuth } from '../context/AuthContext';
@@ -15,6 +15,10 @@ export default function SignInScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    navigation.setOptions({ title: mode === 'signUp' ? 'Create Account' : 'Sign In' });
+  }, [mode, navigation]);
 
   const isValid = email.includes('@') && password.length >= 6 && (mode === 'signIn' || password === confirmPassword);
 
@@ -77,7 +81,7 @@ export default function SignInScreen({ navigation }) {
       <View style={styles.card}>
         <View style={styles.badge}><Text style={styles.badgeText}>₵</Text></View>
         <Text style={styles.title}>{mode === 'signUp' ? t.signUp : t.emailTitle}</Text>
-        <Text style={styles.subtitle}>{t.emailSubtitle}</Text>
+        <Text style={styles.subtitle}>{mode === 'signUp' ? 'Create an account to get started' : t.emailSubtitle}</Text>
 
         <TextInput value={email} onChangeText={setEmail} placeholder={t.emailPlaceholder} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={styles.input} placeholderTextColor={COLORS.muted} />
         <TextInput value={password} onChangeText={setPassword} placeholder={t.passwordPlaceholder} secureTextEntry style={styles.input} placeholderTextColor={COLORS.muted} />
@@ -90,7 +94,9 @@ export default function SignInScreen({ navigation }) {
 
         <TouchableOpacity style={[styles.primary, (!isValid || loading) && styles.disabled]} onPress={handleAuth} disabled={!isValid || loading}><Text style={styles.primaryText}>{loading ? 'Please wait…' : mode === 'signUp' ? t.signUp : t.signIn}</Text></TouchableOpacity>
 
-        <TouchableOpacity onPress={forgot} style={styles.link}><Text style={styles.linkText}>{t.forgotPassword}</Text></TouchableOpacity>
+        {mode === 'signIn' && (
+          <TouchableOpacity onPress={forgot} style={styles.link}><Text style={styles.linkText}>{t.forgotPassword}</Text></TouchableOpacity>
+        )}
 
         <View style={styles.divider} />
         <TouchableOpacity onPress={() => setMode(mode === 'signIn' ? 'signUp' : 'signIn')} style={styles.link}>

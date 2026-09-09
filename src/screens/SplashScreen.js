@@ -121,11 +121,10 @@ export default function SplashScreen({ onFinish }) {
 
 const styles = StyleSheet.create({
   container: {
-    ...StyleSheet.absoluteFillObject,
+    flex: 1,
     backgroundColor: '#050E1F',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 999,
   },
   glow: {
     position: 'absolute',
