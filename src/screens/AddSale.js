@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, FlatList } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, FlatList, ActivityIndicator } from 'react-native';
 import Select from '../components/Select';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, STRINGS, SALE_CATEGORIES, PAYMENT_METHODS } from '../constants';
 import { addTransaction, getInventory } from '../database';
 import { parseTransactionText } from '../utils/claude';
 import { startRecording, stopRecording, transcribeAudio } from '../utils/speech';
+import { initializePayment, watchPayment, formatPhone } from '../lib/payments';
 
 const t = STRINGS.en;
 
@@ -24,8 +25,17 @@ export default function AddSaleScreen({ navigation }) {
   const [inventoryModalVisible, setInventoryModalVisible] = useState(false);
   const [inventorySearch, setInventorySearch] = useState('');
 
+  // MoMo (Paystack) payment flow
+  const [buyerPhone, setBuyerPhone] = useState('');
+  const [payStatus, setPayStatus] = useState('idle'); // idle | pending | completed
+  const payUnsub = useRef(null);
+  const payResolved = useRef(false);
+
   useEffect(() => {
     getInventory().then(setInventory).catch(() => {});
+    return () => {
+      if (payUnsub.current) { payUnsub.current(); payUnsub.current = null; }
+    };
   }, []);
 
   const filteredInventory = inventory.filter(i =>
@@ -52,6 +62,7 @@ export default function AddSaleScreen({ navigation }) {
     const val = parseFloat(amount);
     if (!val || val <= 0) { Alert.alert('Enter a valid amount'); return; }
     if (!description.trim()) { Alert.alert('Enter a description'); return; }
+    if (paymentMethod === 'MoMo') { handleMoMoPayment(val); return; }
     try {
       await addTransaction({
         type: 'sale',
@@ -66,6 +77,69 @@ export default function AddSaleScreen({ navigation }) {
       navigation.goBack();
     } catch (err) {
       Alert.alert('Save Failed', err?.message || 'Could not save sale. Please check your network and Firebase rules.');
+    }
+  };
+
+  const handleMoMoPayment = async (val) => {
+    if (!buyerPhone.trim()) { Alert.alert('Enter Buyer\'s MoMo Number'); return; }
+    setPayStatus('pending');
+    payResolved.current = false;
+    try {
+      const { paymentId } = await initializePayment({
+        amount: val,
+        phone: buyerPhone.trim(),
+        description: description.trim(),
+        category,
+        inventoryItemId: selectedItem?.id || null,
+        quantityUsed: selectedItem ? (parseFloat(quantityUsed) || 1) : 0,
+      });
+
+      payUnsub.current = watchPayment(paymentId, async (p) => {
+        if (payResolved.current) return;
+        if (p.status === 'completed') {
+          payResolved.current = true;
+          if (payUnsub.current) { payUnsub.current(); payUnsub.current = null; }
+          try {
+            await addTransaction({
+              type: 'sale',
+              amount: p.amount,
+              description: p.description,
+              category: p.category,
+              payment_method: 'MoMo',
+              is_credit: 0,
+              inventoryItemId: p.inventoryItemId || null,
+              quantityUsed: p.quantityUsed || 0,
+              payment_status: 'completed',
+              payment_reference: p.paystackRef || null,
+            });
+            setPayStatus('completed');
+            setTimeout(() => navigation.goBack(), 1400);
+          } catch (err) {
+            setPayStatus('idle');
+            Alert.alert('Payment received', 'The payment was received, but it could not be saved to your ledger. It still appears in your Paystack dashboard.');
+          }
+        } else if (p.status === 'failed') {
+          payResolved.current = true;
+          if (payUnsub.current) { payUnsub.current(); payUnsub.current = null; }
+          setPayStatus('idle');
+          setBuyerPhone('');
+          Alert.alert('Payment Failed', 'The Mobile Money payment was not completed. Please try again.');
+        }
+      });
+
+      // Safety timeout — if no webhook within 90s, stop listening
+      setTimeout(() => {
+        if (!payResolved.current && payUnsub.current) {
+          payUnsub.current();
+          payUnsub.current = null;
+          setPayStatus('idle');
+          Alert.alert('Payment Timeout', 'We couldn\'t confirm the payment. Ask the buyer to check their phone for the MoMo prompt, then try again.');
+        }
+      }, 90000);
+    } catch (err) {
+      setPayStatus('idle');
+      const clean = err?.details?.message || err?.details || err?.message || 'Could not start the Mobile Money payment.';
+      Alert.alert('Payment Request Failed', String(clean));
     }
   };
 
@@ -176,11 +250,38 @@ export default function AddSaleScreen({ navigation }) {
           ))}
         </View>
 
+        {paymentMethod === 'MoMo' && (
+          <View>
+            <Text style={styles.label}>BUYER'S MOMO NUMBER</Text>
+            <TextInput
+              style={styles.input}
+              value={buyerPhone}
+              onChangeText={setBuyerPhone}
+              placeholder="e.g. 024 123 4567"
+              keyboardType="phone-pad"
+              placeholderTextColor={COLORS.muted}
+            />
+            <Text style={styles.momoHint}>
+              A Mobile Money prompt will be sent to this number. The buyer confirms with their MoMo PIN.
+            </Text>
+          </View>
+        )}
+
         <TouchableOpacity style={[styles.mic, recording && styles.micActive]} onPress={handleVoice}>
           <Text style={styles.micText}>{recording ? '● Recording… tap to stop' : '🎙️ Tap to speak: "47.50 for milo and bread"'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.primary} onPress={save}><Text style={styles.primaryText}>{t.save}</Text></TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.primary, payStatus === 'pending' && styles.primaryDisabled]}
+          onPress={save}
+          disabled={payStatus === 'pending'}
+        >
+          <Text style={styles.primaryText}>
+            {paymentMethod === 'MoMo'
+              ? (payStatus === 'pending' ? 'Sending request…' : 'Send MoMo Request')
+              : t.save}
+          </Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={() => navigation.goBack()}><Text style={styles.secondaryText}>{t.cancel}</Text></TouchableOpacity>
       </View>
 
@@ -227,6 +328,43 @@ export default function AddSaleScreen({ navigation }) {
           />
         </View>
       </Modal>
+
+      {/* MoMo payment — waiting for buyer */}
+      <Modal visible={payStatus === 'pending'} transparent animationType="fade">
+        <View style={styles.payOverlay}>
+          <View style={styles.payCard}>
+            <Ionicons name="phone-portrait-outline" size={40} color={COLORS.gold} />
+            <ActivityIndicator size="large" color={COLORS.navy} style={{ marginTop: 14 }} />
+            <Text style={styles.payTitle}>Waiting for buyer…</Text>
+            <Text style={styles.payText}>
+              A Mobile Money prompt has been sent to {formatPhone(buyerPhone)}. Ask the buyer to enter their PIN to confirm.
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                payResolved.current = true;
+                if (payUnsub.current) { payUnsub.current(); payUnsub.current = null; }
+                setPayStatus('idle');
+              }}
+              style={styles.payCancel}
+            >
+              <Text style={styles.payCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MoMo payment — success */}
+      <Modal visible={payStatus === 'completed'} transparent animationType="fade">
+        <View style={styles.payOverlay}>
+          <View style={styles.payCard}>
+            <Ionicons name="checkmark-circle" size={56} color={COLORS.teal} />
+            <Text style={styles.payTitle}>Payment received!</Text>
+            <Text style={styles.payText}>
+              GHS {parseFloat(amount).toFixed(2)} from {formatPhone(buyerPhone)} has been confirmed and saved to your ledger.
+            </Text>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -252,8 +390,16 @@ const styles = StyleSheet.create({
   micText: { fontWeight: '700', color: COLORS.navy, fontSize: 13, textAlign: 'center' },
   primary: { backgroundColor: COLORS.gold, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
   primaryText: { color: COLORS.navy, fontWeight: '900', fontSize: 16 },
+  primaryDisabled: { opacity: 0.6 },
   secondary: { alignItems: 'center', padding: 14 },
   secondaryText: { color: COLORS.muted, fontWeight: '700' },
+  momoHint: { color: COLORS.muted, fontSize: 12, marginTop: 8, lineHeight: 17 },
+  payOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 28 },
+  payCard: { width: '100%', maxWidth: 340, backgroundColor: COLORS.white, borderRadius: 20, padding: 24, alignItems: 'center' },
+  payTitle: { fontSize: 18, fontWeight: '900', color: COLORS.navy, marginTop: 16, textAlign: 'center' },
+  payText: { fontSize: 14, color: COLORS.muted, marginTop: 8, textAlign: 'center', lineHeight: 20 },
+  payCancel: { marginTop: 18, paddingVertical: 10, paddingHorizontal: 24 },
+  payCancelText: { color: COLORS.muted, fontWeight: '700', fontSize: 14 },
   // Inventory
   inventoryPicker: {
     flexDirection: 'row', alignItems: 'center', gap: 10,

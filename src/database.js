@@ -83,8 +83,18 @@ export async function updateShop({ name, category, phone, daily_target }) {
   fallbackShop = { id: 1, name: name.trim() || 'My Shop', category, phone, daily_target: target, created_at: new Date().toISOString() };
 }
 
-export async function addTransaction({ type, amount, description, category, payment_method, is_credit, inventoryItemId, quantityUsed }) {
-  const tx = { type, amount, description, category, payment_method: payment_method || null, is_credit: is_credit ? 1 : 0, created_at: new Date().toISOString() };
+export async function addTransaction({ type, amount, description, category, payment_method, is_credit, inventoryItemId, quantityUsed, payment_status, payment_reference }) {
+  const tx = {
+    type,
+    amount,
+    description,
+    category,
+    payment_method: payment_method || null,
+    is_credit: is_credit ? 1 : 0,
+    payment_status: payment_status || null,
+    payment_reference: payment_reference || null,
+    created_at: new Date().toISOString(),
+  };
   fallbackTx.unshift({ id: Date.now().toString(), shop_id: 1, ...tx });
   const uid = await getAuthUid();
   if (uid && isFirebaseConfigured()) {
@@ -127,6 +137,8 @@ export async function getTransactions({ type, search, dateFilter } = {}) {
           category: v.category,
           payment_method: v.payment_method,
           is_credit: v.is_credit,
+          payment_status: v.payment_status,
+          payment_reference: v.payment_reference,
           created_at: v.createdAt?.toDate?.()?.toISOString?.() || v.created_at || new Date().toISOString(),
         };
       });
