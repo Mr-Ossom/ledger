@@ -6,7 +6,7 @@ import { COLORS, STRINGS, SALE_CATEGORIES, PAYMENT_METHODS } from '../constants'
 import { addTransaction, getInventory } from '../database';
 import { parseTransactionText } from '../utils/claude';
 import { startRecording, stopRecording, transcribeAudio } from '../utils/speech';
-import { initializePayment, watchPayment, formatPhone } from '../lib/payments';
+import { initializePayment, submitPaymentOtp, watchPayment, formatPhone } from '../lib/payments';
 
 const t = STRINGS.en;
 
@@ -28,6 +28,10 @@ export default function AddSaleScreen({ navigation }) {
   // MoMo (Paystack) payment flow
   const [buyerPhone, setBuyerPhone] = useState('');
   const [payStatus, setPayStatus] = useState('idle'); // idle | pending | completed
+  const [payStep, setPayStep] = useState('waiting'); // waiting | otp | submitting_otp
+  const [payOtp, setPayOtp] = useState('');
+  const [payRefCode, setPayRefCode] = useState('');
+  const [payDisplayText, setPayDisplayText] = useState('');
   const payUnsub = useRef(null);
   const payResolved = useRef(false);
 
@@ -83,9 +87,12 @@ export default function AddSaleScreen({ navigation }) {
   const handleMoMoPayment = async (val) => {
     if (!buyerPhone.trim()) { Alert.alert('Enter Buyer\'s MoMo Number'); return; }
     setPayStatus('pending');
+    setPayStep('waiting');
+    setPayOtp('');
     payResolved.current = false;
+
     try {
-      const { paymentId } = await initializePayment({
+      const paymentInfo = await initializePayment({
         amount: val,
         phone: buyerPhone.trim(),
         description: description.trim(),
@@ -94,7 +101,17 @@ export default function AddSaleScreen({ navigation }) {
         quantityUsed: selectedItem ? (parseFloat(quantityUsed) || 1) : 0,
       });
 
-      payUnsub.current = watchPayment(paymentId, async (p) => {
+      setPayRefCode(paymentInfo.reference);
+
+      // If Paystack asks for OTP / PIN / Voucher code
+      if (paymentInfo.chargeStatus === 'send_otp' || paymentInfo.chargeStatus === 'send_pin') {
+        setPayStep('otp');
+        setPayDisplayText(paymentInfo.displayText || 'Enter the authorization code / OTP sent to buyer phone:');
+      } else {
+        setPayStep('waiting');
+      }
+
+      payUnsub.current = watchPayment(paymentInfo, async (p) => {
         if (payResolved.current) return;
         if (p.status === 'completed') {
           payResolved.current = true;
@@ -102,15 +119,15 @@ export default function AddSaleScreen({ navigation }) {
           try {
             await addTransaction({
               type: 'sale',
-              amount: p.amount,
-              description: p.description,
-              category: p.category,
+              amount: p.amount || val,
+              description: p.description || description.trim(),
+              category: p.category || category,
               payment_method: 'MoMo',
               is_credit: 0,
-              inventoryItemId: p.inventoryItemId || null,
-              quantityUsed: p.quantityUsed || 0,
+              inventoryItemId: p.inventoryItemId || selectedItem?.id || null,
+              quantityUsed: p.quantityUsed || (selectedItem ? (parseFloat(quantityUsed) || 1) : 0),
               payment_status: 'completed',
-              payment_reference: p.paystackRef || null,
+              payment_reference: p.paystackRef || paymentInfo.reference,
             });
             setPayStatus('completed');
             setTimeout(() => navigation.goBack(), 1400);
@@ -127,7 +144,7 @@ export default function AddSaleScreen({ navigation }) {
         }
       });
 
-      // Safety timeout — if no webhook within 90s, stop listening
+      // Safety timeout — if no resolution within 90s, stop listening
       setTimeout(() => {
         if (!payResolved.current && payUnsub.current) {
           payUnsub.current();
@@ -140,6 +157,21 @@ export default function AddSaleScreen({ navigation }) {
       setPayStatus('idle');
       const clean = err?.details?.message || err?.details || err?.message || 'Could not start the Mobile Money payment.';
       Alert.alert('Payment Request Failed', String(clean));
+    }
+  };
+
+  const handleOtpSubmit = async () => {
+    if (!payOtp.trim()) {
+      Alert.alert('Enter Code', 'Please enter the OTP or Voucher code.');
+      return;
+    }
+    setPayStep('submitting_otp');
+    try {
+      await submitPaymentOtp({ reference: payRefCode, otp: payOtp.trim() });
+      setPayStep('waiting');
+    } catch (e) {
+      Alert.alert('Verification Failed', e?.message || 'Could not verify code. Please try again.');
+      setPayStep('otp');
     }
   };
 
@@ -178,74 +210,97 @@ export default function AddSaleScreen({ navigation }) {
     const p = await parseTransactionText(description);
     if (p.amount) setAmount(String(p.amount));
     if (p.category) setCategory(p.category);
+    if (p.payment_method) setPaymentMethod(p.payment_method);
     setParsing(false);
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.amountBox}>
-        <Text style={styles.label}>{t.amount}</Text>
+        <Text style={[styles.label, { color: COLORS.gold }]}>{t.amount} (GHS)</Text>
         <View style={styles.amountRow}>
-          <Text style={styles.cedi}>GHS</Text>
-          <TextInput value={amount} onChangeText={setAmount} placeholder="0.00" keyboardType="decimal-pad" style={styles.amountInput} placeholderTextColor={COLORS.muted} />
+          <Text style={styles.cedi}>GH₵</Text>
+          <TextInput
+            style={styles.amountInput}
+            value={amount}
+            onChangeText={setAmount}
+            placeholder="0.00"
+            keyboardType="decimal-pad"
+            placeholderTextColor={COLORS.muted}
+          />
         </View>
       </View>
 
       <View style={styles.card}>
-        {/* Inventory item picker */}
-        <Text style={styles.label}>LINK TO INVENTORY ITEM (optional)</Text>
+        {/* Inventory Item Picker Button */}
+        <Text style={styles.label}>LINK INVENTORY ITEM (OPTIONAL)</Text>
         <TouchableOpacity
-          style={styles.inventoryPicker}
+          style={styles.inventoryPickerBtn}
           onPress={() => setInventoryModalVisible(true)}
         >
-          <Ionicons name="cube-outline" size={18} color={selectedItem ? COLORS.teal : COLORS.muted} />
-          <Text style={[styles.inventoryPickerText, selectedItem && { color: COLORS.navy }]}>
-            {selectedItem ? selectedItem.name : 'Select an item to auto-deduct stock'}
+          <Ionicons name="cube-outline" size={18} color={selectedItem ? COLORS.navy : COLORS.muted} style={{ marginRight: 8 }} />
+          <Text style={[styles.inventoryPickerText, selectedItem && { color: COLORS.navy, fontWeight: '700' }]}>
+            {selectedItem ? `${selectedItem.name} (Stock: ${selectedItem.quantity} ${selectedItem.unit})` : 'Select from inventory…'}
           </Text>
-          {selectedItem
-            ? <TouchableOpacity onPress={() => setSelectedItem(null)}>
-                <Ionicons name="close-circle" size={18} color={COLORS.muted} />
-              </TouchableOpacity>
-            : <Ionicons name="chevron-forward" size={16} color={COLORS.muted} />
-          }
+          {selectedItem && (
+            <TouchableOpacity onPress={() => setSelectedItem(null)} style={{ padding: 4 }}>
+              <Ionicons name="close-circle" size={18} color={COLORS.muted} />
+            </TouchableOpacity>
+          )}
         </TouchableOpacity>
 
         {selectedItem && (
           <View style={styles.qtyRow}>
-            <Text style={styles.label}>QUANTITY SOLD</Text>
+            <Text style={[styles.label, { marginTop: 8 }]}>QUANTITY SOLD ({selectedItem.unit})</Text>
             <TextInput
-              style={[styles.input, { flex: 1 }]}
+              style={styles.qtyInput}
               value={quantityUsed}
               onChangeText={handleQtyChange}
               keyboardType="decimal-pad"
               placeholder="1"
               placeholderTextColor={COLORS.muted}
             />
-            <Text style={styles.unitLabel}>{selectedItem.unit}</Text>
-          </View>
-        )}
-
-        {selectedItem && (
-          <View style={styles.stockInfo}>
-            <Ionicons name="information-circle-outline" size={14} color={COLORS.teal} />
-            <Text style={styles.stockInfoText}>
-              {' '}Current stock: {inventory.find(i => i.id === selectedItem.id)?.quantity ?? '?'} {selectedItem.unit} — will deduct {quantityUsed || 1} on save
-            </Text>
           </View>
         )}
 
         <Text style={styles.label}>{t.description}</Text>
-        <TextInput value={description} onChangeText={setDescription} placeholder={t.descriptionSalePlaceholder} style={styles.input} placeholderTextColor={COLORS.muted} onBlur={onFreeText} />
-        <TouchableOpacity onPress={onFreeText} style={styles.parseLink}><Text style={styles.parseLinkText}>{parsing ? 'Parsing…' : '✦ Parse with AI'}</Text></TouchableOpacity>
+        <TextInput
+          style={styles.input}
+          value={description}
+          onChangeText={setDescription}
+          placeholder="e.g. 2 bags of rice"
+          placeholderTextColor={COLORS.muted}
+          onBlur={onFreeText}
+        />
+        {parsing && <Text style={styles.parsingText}>✨ AI is auto-categorizing…</Text>}
 
         <Text style={styles.label}>{t.category}</Text>
-        <Select value={category} onChange={setCategory} options={SALE_CATEGORIES} title={t.category} />
+        <Select
+          options={SALE_CATEGORIES}
+          value={category}
+          onChange={setCategory}
+        />
 
         <Text style={styles.label}>{t.paymentMethod}</Text>
-        <View style={styles.segment}>
-          {PAYMENT_METHODS.map(m => (
-            <TouchableOpacity key={m} onPress={() => setPaymentMethod(m)} style={[styles.segBtn, paymentMethod === m && styles.segActive]}>
-              <Text style={[styles.segText, paymentMethod === m && styles.segTextActive]}>{m}</Text>
+        <View style={styles.pillRow}>
+          {PAYMENT_METHODS.map((method) => (
+            <TouchableOpacity
+              key={method}
+              style={[
+                styles.pill,
+                paymentMethod === method && styles.pillActive,
+                method === 'MoMo' && paymentMethod === 'MoMo' && styles.pillMoMo,
+              ]}
+              onPress={() => setPaymentMethod(method)}
+            >
+              <Text
+                style={[
+                  styles.pillText,
+                  paymentMethod === method && styles.pillTextActive,
+                ]}
+              >
+                {method === 'MoMo' ? '📱 MoMo' : method}
+              </Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -329,16 +384,48 @@ export default function AddSaleScreen({ navigation }) {
         </View>
       </Modal>
 
-      {/* MoMo payment — waiting for buyer */}
+      {/* MoMo payment — waiting for buyer or entering OTP */}
       <Modal visible={payStatus === 'pending'} transparent animationType="fade">
         <View style={styles.payOverlay}>
           <View style={styles.payCard}>
-            <Ionicons name="phone-portrait-outline" size={40} color={COLORS.gold} />
-            <ActivityIndicator size="large" color={COLORS.navy} style={{ marginTop: 14 }} />
-            <Text style={styles.payTitle}>Waiting for buyer…</Text>
-            <Text style={styles.payText}>
-              A Mobile Money prompt has been sent to {formatPhone(buyerPhone)}. Ask the buyer to enter their PIN to confirm.
-            </Text>
+            {payStep === 'otp' || payStep === 'submitting_otp' ? (
+              <>
+                <Ionicons name="keypad-outline" size={40} color={COLORS.gold} />
+                <Text style={styles.payTitle}>Enter MoMo Code</Text>
+                <Text style={styles.payText}>
+                  {payDisplayText || 'Please enter the authorization code / OTP sent to the buyer:'}
+                </Text>
+                <TextInput
+                  style={[styles.input, { width: '100%', textAlign: 'center', fontSize: 20, letterSpacing: 3, fontWeight: '700', marginTop: 12 }]}
+                  value={payOtp}
+                  onChangeText={setPayOtp}
+                  placeholder="e.g. 123456"
+                  keyboardType="number-pad"
+                  placeholderTextColor={COLORS.muted}
+                />
+                <TouchableOpacity
+                  style={[styles.primary, { width: '100%', marginTop: 14 }]}
+                  onPress={handleOtpSubmit}
+                  disabled={payStep === 'submitting_otp'}
+                >
+                  {payStep === 'submitting_otp' ? (
+                    <ActivityIndicator color="#FFF" size="small" />
+                  ) : (
+                    <Text style={styles.primaryText}>Submit Code</Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Ionicons name="phone-portrait-outline" size={40} color={COLORS.gold} />
+                <ActivityIndicator size="large" color={COLORS.navy} style={{ marginTop: 14 }} />
+                <Text style={styles.payTitle}>Waiting for buyer…</Text>
+                <Text style={styles.payText}>
+                  A Mobile Money prompt has been sent to {formatPhone(buyerPhone)}. Ask the buyer to enter their PIN to confirm.
+                </Text>
+              </>
+            )}
+
             <TouchableOpacity
               onPress={() => {
                 payResolved.current = true;
@@ -378,48 +465,42 @@ const styles = StyleSheet.create({
   amountInput: { flex: 1, backgroundColor: COLORS.white, borderRadius: 12, height: 56, paddingHorizontal: 14, fontSize: 22, fontWeight: '900', color: COLORS.navy, fontFamily: 'monospace' },
   card: { backgroundColor: COLORS.white, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: COLORS.lightGray },
   input: { height: 52, borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, paddingHorizontal: 14, fontSize: 15, color: COLORS.navy, backgroundColor: COLORS.white },
-  segment: { flexDirection: 'row', gap: 8 },
-  segBtn: { flex: 1, height: 44, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.navy, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.white },
-  segActive: { backgroundColor: COLORS.navy },
-  segText: { fontWeight: '700', color: COLORS.navy, fontSize: 12 },
-  segTextActive: { color: COLORS.cream },
-  parseLink: { alignSelf: 'flex-end', paddingVertical: 6 },
-  parseLinkText: { color: COLORS.teal, fontWeight: '700', fontSize: 12 },
-  mic: { marginTop: 14, backgroundColor: COLORS.cream, borderWidth: 1, borderColor: COLORS.lightGray, borderRadius: 12, padding: 14, alignItems: 'center' },
-  micActive: { backgroundColor: COLORS.rust, borderColor: COLORS.rust },
-  micText: { fontWeight: '700', color: COLORS.navy, fontSize: 13, textAlign: 'center' },
-  primary: { backgroundColor: COLORS.gold, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
-  primaryText: { color: COLORS.navy, fontWeight: '900', fontSize: 16 },
+  parsingText: { fontSize: 12, color: COLORS.gold, fontWeight: '700', marginTop: 4 },
+  mic: { marginTop: 16, padding: 14, borderRadius: 12, backgroundColor: '#F0EAE1', alignItems: 'center' },
+  micActive: { backgroundColor: '#FCE4E4' },
+  micText: { color: COLORS.navy, fontWeight: '700', fontSize: 13 },
+  primary: { marginTop: 16, backgroundColor: COLORS.navy, height: 54, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
   primaryDisabled: { opacity: 0.6 },
-  secondary: { alignItems: 'center', padding: 14 },
-  secondaryText: { color: COLORS.muted, fontWeight: '700' },
-  momoHint: { color: COLORS.muted, fontSize: 12, marginTop: 8, lineHeight: 17 },
-  payOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 28 },
-  payCard: { width: '100%', maxWidth: 340, backgroundColor: COLORS.white, borderRadius: 20, padding: 24, alignItems: 'center' },
-  payTitle: { fontSize: 18, fontWeight: '900', color: COLORS.navy, marginTop: 16, textAlign: 'center' },
-  payText: { fontSize: 14, color: COLORS.muted, marginTop: 8, textAlign: 'center', lineHeight: 20 },
-  payCancel: { marginTop: 18, paddingVertical: 10, paddingHorizontal: 24 },
-  payCancelText: { color: COLORS.muted, fontWeight: '700', fontSize: 14 },
-  // Inventory
-  inventoryPicker: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12,
-    paddingHorizontal: 14, height: 52, backgroundColor: COLORS.white,
+  primaryText: { color: COLORS.white, fontWeight: '800', fontSize: 16 },
+  secondary: { marginTop: 10, height: 44, justifyContent: 'center', alignItems: 'center' },
+  secondaryText: { color: COLORS.muted, fontWeight: '700', fontSize: 14 },
+  pillRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  pill: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: COLORS.lightGray, alignItems: 'center', backgroundColor: COLORS.white },
+  pillActive: { borderColor: COLORS.navy, backgroundColor: COLORS.navy },
+  pillMoMo: { borderColor: COLORS.gold, backgroundColor: COLORS.navy },
+  pillText: { fontWeight: '700', fontSize: 13, color: COLORS.navy },
+  pillTextActive: { color: COLORS.white },
+  momoHint: { fontSize: 12, color: COLORS.muted, marginTop: 6, lineHeight: 17 },
+  payOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  payCard: { backgroundColor: COLORS.white, borderRadius: 20, padding: 28, alignItems: 'center', width: '100%', maxWidth: 340, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 12, elevation: 8 },
+  payTitle: { fontSize: 18, fontWeight: '900', color: COLORS.navy, marginTop: 12, textAlign: 'center' },
+  payText: { fontSize: 13, color: COLORS.muted, textAlign: 'center', marginTop: 8, lineHeight: 19 },
+  payCancel: { marginTop: 20, paddingVertical: 8, paddingHorizontal: 20 },
+  payCancelText: { color: COLORS.muted, fontWeight: '700', fontSize: 13 },
+  inventoryPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 50,
+    borderWidth: 1.5,
+    borderColor: COLORS.lightGray,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    backgroundColor: '#FAF8F5',
   },
-  inventoryPickerText: { flex: 1, color: COLORS.muted, fontSize: 14 },
-  qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
-  unitLabel: { fontWeight: '700', color: COLORS.muted },
-  stockInfo: { flexDirection: 'row', alignItems: 'center', marginTop: 6, marginBottom: 4 },
-  stockInfoText: { color: COLORS.teal, fontSize: 12, fontWeight: '600' },
-  searchRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: COLORS.white, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
-    borderWidth: 1, borderColor: COLORS.lightGray, marginBottom: 12,
-  },
-  inventoryRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: COLORS.white, borderRadius: 12, padding: 14,
-    marginBottom: 8, borderWidth: 1, borderColor: COLORS.lightGray,
-  },
-  qtyBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  inventoryPickerText: { flex: 1, fontSize: 14, color: COLORS.muted },
+  qtyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
+  qtyInput: { width: 90, height: 44, borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 10, paddingHorizontal: 12, fontSize: 16, fontWeight: '700', color: COLORS.navy, textAlign: 'center', backgroundColor: COLORS.white },
+  searchRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.white, borderRadius: 10, paddingHorizontal: 12, height: 40, marginBottom: 12, borderWidth: 1, borderColor: COLORS.lightGray },
+  inventoryRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.lightGray },
+  qtyBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
 });

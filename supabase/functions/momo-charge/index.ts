@@ -2,35 +2,32 @@
  * Supabase Edge Function: momo-charge
  *
  * Calls Paystack's direct /charge API so the USSD prompt goes straight
- * to the buyer's Ghana MoMo phone. The Paystack secret key lives here
- * (safe on Supabase servers, never in the app).
- *
- * The app writes the Firestore payment tracking doc itself using its
- * existing Firebase client — no firebase-admin needed here.
- *
- * Set this secret once:
- *   npx supabase secrets set PAYSTACK_SECRET_KEY=sk_live_...
+ * to the buyer's Ghana MoMo phone.
  */
 
 const PAYSTACK_SECRET_KEY = Deno.env.get("PAYSTACK_SECRET_KEY") ?? "";
 const PAYSTACK_BASE = "https://api.paystack.co";
 
-function normalizeGhanaPhone(input: string): string {
+function parseGhanaPhone(input: string): { local: string; e164: string } {
   let s = String(input ?? "").trim().replace(/[\s\-().]/g, "");
-  if (s.startsWith("+")) s = s.slice(1);
-  if (s.startsWith("0")) s = "233" + s.slice(1);
-  if (!/^233\d{9}$/.test(s)) {
+  if (s.startsWith("+233")) s = s.slice(4);
+  else if (s.startsWith("233")) s = s.slice(3);
+  else if (s.startsWith("0")) s = s.slice(1);
+
+  if (!/^\d{9}$/.test(s)) {
     throw new Error("Please enter a valid Ghana mobile number (e.g. 024 123 4567).");
   }
-  return "+" + s;
+
+  const local = "0" + s;        // e.g. "0241234567" - required by Paystack MoMo API
+  const e164 = "+233" + s;      // e.g. "+233241234567"
+  return { local, e164 };
 }
 
-function inferProvider(e164: string): "mtn" | "vod" | "atl" {
-  const local = e164.replace(/^\+233/, "0");
-  if (/^0(24|54|55|59|25)/.test(local)) return "mtn";
-  if (/^0(20|50)/.test(local)) return "vod";
-  if (/^0(27|57|26|56)/.test(local)) return "atl";
-  return "mtn"; // MTN is most common in Ghana
+function inferProvider(localPhone: string): "mtn" | "vod" | "atl" {
+  if (/^0(24|54|55|59|25)/.test(localPhone)) return "mtn";
+  if (/^0(20|50)/.test(localPhone)) return "vod";
+  if (/^0(27|57|26|56)/.test(localPhone)) return "atl";
+  return "mtn";
 }
 
 function respond(body: unknown, status = 200) {
@@ -73,21 +70,24 @@ Deno.serve(async (req: Request) => {
   if (!amount || Number(amount) <= 0) return respond({ error: "Enter a valid amount." }, 400);
   if (!phone) return respond({ error: "Buyer phone number is required." }, 400);
 
-  let normalizedPhone: string;
+  let localPhone: string;
+  let e164Phone: string;
   try {
-    normalizedPhone = normalizeGhanaPhone(String(phone));
+    const parsed = parseGhanaPhone(String(phone));
+    localPhone = parsed.local;
+    e164Phone = parsed.e164;
   } catch (e) {
     return respond({ error: (e as Error).message }, 400);
   }
 
-  const provider = inferProvider(normalizedPhone);
+  const provider = inferProvider(localPhone);
   const safeShopId = String(shopId ?? "none");
   const uuid = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
   const reference = `CL-${safeShopId}-${uuid}`.replace(/[^A-Za-z0-9\-_=.]/g, "_");
-  const email = `${normalizedPhone.replace("+", "")}@coreledger.app`;
+  const email = `${localPhone}@coreledger.app`;
   const amountPesewas = Math.round(Number(amount) * 100);
 
-  // Call Paystack /charge — this sends the USSD prompt directly to the buyer's phone
+  // Call Paystack /charge — Paystack Ghana expects 10-digit local format for mobile_money.phone
   let chargeData: Record<string, unknown>;
   try {
     const chargeRes = await fetch(`${PAYSTACK_BASE}/charge`, {
@@ -102,12 +102,12 @@ Deno.serve(async (req: Request) => {
         currency: "GHS",
         reference,
         mobile_money: {
-          phone: normalizedPhone, // E.164 e.g. "+233241234567"
-          provider,               // "mtn" | "vod" | "atl"
+          phone: localPhone, // e.g. "0551234987" (10-digit local format required for direct USSD prompt)
+          provider,          // "mtn" | "vod" | "atl"
         },
         metadata: {
           custom_fields: [
-            { display_name: "Buyer Phone", variable_name: "phone", value: normalizedPhone },
+            { display_name: "Buyer Phone", variable_name: "phone", value: localPhone },
             { display_name: "Shop ID", variable_name: "shop_id", value: safeShopId },
             { display_name: "Description", variable_name: "description", value: String(description ?? "") },
             { display_name: "App", variable_name: "app", value: "CoreLedger" },
@@ -117,7 +117,7 @@ Deno.serve(async (req: Request) => {
     });
 
     chargeData = await chargeRes.json().catch(() => ({})) as Record<string, unknown>;
-    console.log("Paystack /charge:", JSON.stringify(chargeData));
+    console.log("Paystack /charge response:", JSON.stringify(chargeData));
 
     if (!chargeRes.ok || !chargeData.status) {
       const msg = String((chargeData.message as string) ?? "Paystack could not start the payment.");
@@ -135,12 +135,13 @@ Deno.serve(async (req: Request) => {
   }
 
   const chargeStatus = String((chargeData.data as Record<string, unknown>)?.status ?? "pending");
+  const displayText = String((chargeData.data as Record<string, unknown>)?.display_text ?? "");
 
-  // Return the Paystack reference so the app can write the Firestore doc itself
   return respond({
-    reference,        // app uses this to write the Firestore payments doc
-    chargeStatus,     // "pending" | "pay_offline" | "success"
+    reference,
+    chargeStatus,
     provider,
-    normalizedPhone,
+    normalizedPhone: localPhone,
+    displayText,
   });
 });

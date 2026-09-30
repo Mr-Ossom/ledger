@@ -1,9 +1,17 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Client can only read its own payment records (watchPayment).
-    // All writes to /payments come from the admin/backend server (Paystack webhook + initialize).
+    // App data (unchanged behaviour): any authenticated user can read/write
+    match /shops/{shopId} {
+      allow read, write: if request.auth != null;
+    }
+    match /transactions/{txId} {
+      allow read, write: if request.auth != null;
+    }
+    match /inventory/{itemId} {
+      allow read, write: if request.auth != null;
+    }
+    // Payments: owner may read; only the backend service account writes
     match /payments/{paymentId} {
       allow read: if request.auth != null && request.auth.uid == resource.data.ownerId;
       allow create, update, delete: if false;

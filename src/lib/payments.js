@@ -1,20 +1,17 @@
-import { doc, collection, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from './firebase';
 import { supabase } from './supabase';
 
 /**
- * Triggers a direct MoMo USSD prompt on the buyer's phone via Paystack.
+ * Triggers a direct MoMo charge on the buyer's phone via Paystack.
  *
  * Flow:
- *  1. App calls Supabase Edge Function (momo-charge) — free, no upgrade needed.
- *     Paystack secret key lives safely there, never in the app.
- *  2. Edge Function calls Paystack /charge → USSD prompt hits buyer's phone.
- *  3. App writes the Firestore payment tracking doc directly (Firebase client).
- *  4. watchPayment listens to Firestore AND polls momo-verify for instant auto-confirmation.
- *  5. Once completed, sale is saved to ledger.
+ *  1. App calls Supabase Edge Function (momo-charge) — Paystack secret key lives safely there.
+ *  2. Edge Function calls Paystack /charge.
+ *  3. watchPayment actively polls momo-verify with the returned reference.
  */
 export async function initializePayment({ amount, phone, description, category, inventoryItemId, quantityUsed }) {
-  // Call the Supabase Edge Function (holds the Paystack secret safely)
+  // 1. Call Supabase Edge Function
   const { data, error } = await supabase.functions.invoke('momo-charge', {
     body: { amount, phone, description },
   });
@@ -24,54 +21,67 @@ export async function initializePayment({ amount, phone, description, category, 
     throw new Error(msg);
   }
 
-  const { reference, chargeStatus, provider, normalizedPhone } = data;
+  const { reference, chargeStatus, provider, normalizedPhone, displayText } = data;
 
-  // Write payment tracking doc directly from app using existing Firebase client
-  const uid = auth?.currentUser?.uid ?? 'anonymous';
-  const payRef = doc(collection(db, 'payments'));
-
-  await setDoc(payRef, {
-    ownerId: uid,
+  return {
+    paymentId: reference,
+    reference,
+    chargeStatus,
+    provider,
+    normalizedPhone,
+    displayText: displayText || '',
     amount,
-    phone: normalizedPhone ?? phone,
     description,
     category,
-    payment_method: 'MoMo',
-    inventoryItemId: inventoryItemId ?? null,
-    quantityUsed: quantityUsed ?? 0,
-    status: chargeStatus === 'success' ? 'completed' : 'pending',
-    paystackRef: reference,
-    paystackChargeStatus: chargeStatus,
-    channel: 'mobile_money',
-    provider: provider ?? 'mtn',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
-  return { paymentId: payRef.id };
+    inventoryItemId,
+    quantityUsed,
+  };
 }
 
 /**
- * Subscribes to a payments Firestore doc with active Paystack verification polling.
- * Returns an unsubscribe function.
- * Statuses: 'pending' → 'completed' | 'failed'
+ * Submits OTP / Voucher code for charges that require send_otp / send_pin.
  */
-export function watchPayment(paymentId, callback) {
+export async function submitPaymentOtp({ reference, otp }) {
+  const { data, error } = await supabase.functions.invoke('momo-submit-otp', {
+    body: { reference, otp },
+  });
+
+  if (error || !data?.status) {
+    const msg = data?.message || data?.error || error?.message || 'Failed to submit OTP.';
+    throw new Error(msg);
+  }
+
+  return data;
+}
+
+/**
+ * Subscribes to a payment tracking record and polls Paystack verify in the background.
+ * Returns an unsubscribe function.
+ */
+export function watchPayment(paymentInfo, callback) {
   let isStopped = false;
   let pollInterval = null;
 
-  const unsubFirestore = onSnapshot(
-    doc(db, 'payments', paymentId),
-    (snap) => {
-      if (!snap.exists() || isStopped) return;
-      const data = snap.data();
-      if (data.status === 'completed' || data.status === 'failed') {
-        stopAll();
-      }
-      callback(data);
-    },
-    (err) => console.error('[watchPayment]', err),
-  );
+  const reference = typeof paymentInfo === 'string' ? paymentInfo : paymentInfo?.reference;
+
+  // Listen to Firestore doc if payments collection is used
+  let unsubFirestore = () => {};
+  try {
+    if (db && reference) {
+      unsubFirestore = onSnapshot(
+        doc(db, 'payments', reference),
+        (snap) => {
+          if (!snap.exists() || isStopped) return;
+          const data = snap.data();
+          if (data.status === 'completed' || data.status === 'failed') {
+            stopAll();
+          }
+          callback(data);
+        },
+        () => {}, // ignore if doc does not exist
+      );
+    }
+  } catch (e) {}
 
   function stopAll() {
     isStopped = true;
@@ -81,7 +91,7 @@ export function watchPayment(paymentId, callback) {
     }
   }
 
-  // Active polling verification in background every 3 seconds for up to 90s
+  // Active polling verification directly with Paystack via momo-verify Edge Function
   const startTime = Date.now();
   pollInterval = setInterval(async () => {
     if (isStopped || Date.now() - startTime > 90000) {
@@ -90,17 +100,32 @@ export function watchPayment(paymentId, callback) {
     }
 
     try {
-      // Get current payment document to find the paystack reference
-      const payDocRef = doc(db, 'payments', paymentId);
-      
       const { data: verifyRes, error } = await supabase.functions.invoke('momo-verify', {
-        body: { reference: paymentId }, // momo-verify can look up by doc or we pass reference
+        body: { reference },
       });
 
-      // Also check by paystackRef if verifyRes gave status
-      // We will verify through Firestore snap if updated
+      if (!error && verifyRes) {
+        const paystackStatus = verifyRes?.data?.status; // "success" | "failed" | "abandoned" | "pending"
+        
+        if (paystackStatus === 'success') {
+          stopAll();
+
+          callback({
+            status: 'completed',
+            paystackRef: reference,
+            amount: typeof paymentInfo === 'object' ? paymentInfo.amount : undefined,
+            description: typeof paymentInfo === 'object' ? paymentInfo.description : undefined,
+            category: typeof paymentInfo === 'object' ? paymentInfo.category : undefined,
+            inventoryItemId: typeof paymentInfo === 'object' ? paymentInfo.inventoryItemId : undefined,
+            quantityUsed: typeof paymentInfo === 'object' ? paymentInfo.quantityUsed : undefined,
+          });
+        } else if (paystackStatus === 'failed') {
+          stopAll();
+          callback({ status: 'failed', paystackRef: reference });
+        }
+      }
     } catch (e) {
-      // Polling error ignored, onSnapshot will handle if webhook fires
+      // Polling error silently ignored for next retry
     }
   }, 3000);
 
