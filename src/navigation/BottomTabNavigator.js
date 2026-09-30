@@ -1,7 +1,17 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, TouchableWithoutFeedback } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Alert,
+  Modal,
+  TouchableWithoutFeedback,
+  Animated,
+  Dimensions,
+  ScrollView,
+} from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { useHeaderHeight } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from '../screens/Home';
@@ -11,8 +21,11 @@ import ReportsScreen from '../screens/Reports';
 import InventoryScreen from '../screens/Inventory';
 import { COLORS } from '../constants';
 import { useAuth } from '../context/AuthContext';
+import { getShop } from '../database';
 
 const Tab = createBottomTabNavigator();
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.82, 320);
 
 const ICONS = {
   Home:      { focused: 'home',      unfocused: 'home-outline' },
@@ -49,35 +62,70 @@ function AddTabIcon({ focused }) {
 }
 
 /**
- * Modern floating profile dropdown menu matching the user's design reference
+ * Premium slide-in drawer menu from the right with backdrop blur and shop details
  */
-function MenuDropdown({ navigation }) {
-  const { signOut } = useAuth();
-  const headerHeight = useHeaderHeight();
+function MenuDrawer({ navigation }) {
+  const { signOut, user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [visible, setVisible] = useState(false);
+  const [shop, setShop] = useState(null);
 
-  const close = () => setVisible(false);
+  const slideAnim = useRef(new Animated.Value(DRAWER_WIDTH)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  const handleProfile = () => {
-    close();
-    navigation.navigate('Profile');
+  useEffect(() => {
+    if (visible) {
+      getShop().then(setShop).catch(() => {});
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [visible]);
+
+  const close = () => {
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: DRAWER_WIDTH,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setVisible(false);
+    });
   };
 
-  const handleSettings = () => {
+  const handleNav = (screen) => {
     close();
-    navigation.navigate('Settings');
+    navigation.navigate(screen);
   };
 
   const handleTheme = () => {
     close();
-    Alert.alert('Theme', 'Current Theme: CoreLedger Classic (Navy & Gold)\n\nCustom color schemes can be managed in Settings.');
+    Alert.alert(
+      'Theme & Display',
+      'Current Theme: Classic Navy & Gold\n\nHigh contrast mode and currency formatting are configured for Ghana Cedi (GH₵).'
+    );
   };
 
   const handleHelp = () => {
     close();
     Alert.alert(
-      'Help Center',
-      'Need help with CoreLedger?\n\n• Record transactions with voice or manual entry\n• Track inventory in the Inventory tab\n• Export your data in Settings\n\nSupport: support@coreledger.app'
+      'Help & Support',
+      'Need assistance with CoreLedger?\n\n• Record sales using voice or manual input\n• Direct Ghana MoMo prompt integration\n• Inventory tracking with low-stock alerts\n• Cloud backup & CSV export in Settings\n\nContact: support@coreledger.app'
     );
   };
 
@@ -102,59 +150,119 @@ function MenuDropdown({ navigation }) {
         onPress={() => setVisible(true)}
         style={styles.menuBtn}
         activeOpacity={0.7}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
-        <Ionicons name="menu" size={26} color={COLORS.navy} />
+        <View style={styles.menuIconBadge}>
+          <Ionicons name="menu" size={24} color={COLORS.navy} />
+        </View>
       </TouchableOpacity>
 
       <Modal
         visible={visible}
         transparent={true}
-        animationType="fade"
+        animationType="none"
         onRequestClose={close}
       >
-        <TouchableWithoutFeedback onPress={close}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={[styles.menuCard, { top: headerHeight + 6 }]}>
-                {/* Profile Item */}
-                <TouchableOpacity style={[styles.menuItem, styles.menuItemActive]} onPress={handleProfile} activeOpacity={0.7}>
-                  <View style={styles.activeBar} />
-                  <Ionicons name="person-outline" size={18} color="#FFFFFF" style={styles.menuIcon} />
-                  <Text style={styles.menuText}>Profile</Text>
-                </TouchableOpacity>
+        <View style={styles.drawerContainer}>
+          {/* Dark Backdrop */}
+          <TouchableWithoutFeedback onPress={close}>
+            <Animated.View style={[styles.backdrop, { opacity: fadeAnim }]} />
+          </TouchableWithoutFeedback>
 
-                {/* Settings Item */}
-                <TouchableOpacity style={styles.menuItem} onPress={handleSettings} activeOpacity={0.7}>
-                  <Ionicons name="settings-outline" size={18} color="#FFFFFF" style={styles.menuIcon} />
-                  <Text style={styles.menuText}>Settings</Text>
-                </TouchableOpacity>
-
-                {/* Theme Item */}
-                <TouchableOpacity style={styles.menuItem} onPress={handleTheme} activeOpacity={0.7}>
-                  <Ionicons name="moon-outline" size={18} color="#FFFFFF" style={styles.menuIcon} />
-                  <Text style={[styles.menuText, { flex: 1 }]}>Theme</Text>
-                  <Ionicons name="chevron-forward" size={15} color={COLORS.muted} />
-                </TouchableOpacity>
-
-                {/* Divider */}
-                <View style={styles.menuDivider} />
-
-                {/* Help Center Item */}
-                <TouchableOpacity style={styles.menuItem} onPress={handleHelp} activeOpacity={0.7}>
-                  <Ionicons name="help-circle-outline" size={18} color="#FFFFFF" style={styles.menuIcon} />
-                  <Text style={styles.menuText}>Help center</Text>
-                </TouchableOpacity>
-
-                {/* Log out Item */}
-                <TouchableOpacity style={styles.menuItem} onPress={handleLogout} activeOpacity={0.7}>
-                  <Ionicons name="log-out-outline" size={18} color="#FF6B6B" style={styles.menuIcon} />
-                  <Text style={[styles.menuText, { color: '#FF6B6B', fontWeight: '700' }]}>Log out</Text>
-                </TouchableOpacity>
+          {/* Slide-in Drawer Panel */}
+          <Animated.View
+            style={[
+              styles.drawerPanel,
+              {
+                width: DRAWER_WIDTH,
+                paddingTop: insets.top + 16,
+                paddingBottom: insets.bottom + 16,
+                transform: [{ translateX: slideAnim }],
+              },
+            ]}
+          >
+            {/* Header: Shop Info & Close Button */}
+            <View style={styles.drawerHeader}>
+              <View style={styles.shopAvatar}>
+                <Ionicons name="storefront" size={24} color={COLORS.gold} />
               </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.shopName} numberOfLines={1}>
+                  {shop?.name || 'My Shop'}
+                </Text>
+                <Text style={styles.shopCategory} numberOfLines={1}>
+                  {shop?.category || 'Provisions Store'}
+                </Text>
+                {user?.email && (
+                  <Text style={styles.userEmail} numberOfLines={1}>
+                    {user.email}
+                  </Text>
+                )}
+              </View>
+              <TouchableOpacity onPress={close} style={styles.closeBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="close" size={22} color="rgba(255,255,255,0.7)" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.drawerDivider} />
+
+            {/* Menu Items */}
+            <ScrollView showsVerticalScrollIndicator={false} style={styles.menuList}>
+              <TouchableOpacity style={styles.drawerItem} onPress={() => handleNav('Profile')} activeOpacity={0.7}>
+                <View style={[styles.iconWrap, { backgroundColor: 'rgba(217, 148, 10, 0.15)' }]}>
+                  <Ionicons name="person-outline" size={18} color={COLORS.gold} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.drawerItemText}>My Profile</Text>
+                  <Text style={styles.drawerItemSub}>Daily target & shop details</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.4)" />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.drawerItem} onPress={() => handleNav('Settings')} activeOpacity={0.7}>
+                <View style={[styles.iconWrap, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
+                  <Ionicons name="settings-outline" size={18} color="#FFFFFF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.drawerItemText}>Settings</Text>
+                  <Text style={styles.drawerItemSub}>Backup, export & notifications</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.4)" />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.drawerItem} onPress={handleTheme} activeOpacity={0.7}>
+                <View style={[styles.iconWrap, { backgroundColor: 'rgba(46, 125, 90, 0.2)' }]}>
+                  <Ionicons name="color-palette-outline" size={18} color="#6EE7B7" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.drawerItemText}>Theme & Display</Text>
+                  <Text style={styles.drawerItemSub}>Classic Navy & Gold</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.4)" />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.drawerItem} onPress={handleHelp} activeOpacity={0.7}>
+                <View style={[styles.iconWrap, { backgroundColor: 'rgba(59, 130, 246, 0.2)' }]}>
+                  <Ionicons name="help-circle-outline" size={18} color="#93C5FD" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.drawerItemText}>Help & Support</Text>
+                  <Text style={styles.drawerItemSub}>FAQ and customer support</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.4)" />
+              </TouchableOpacity>
+            </ScrollView>
+
+            {/* Bottom Section: Log out & App Version */}
+            <View style={styles.bottomSection}>
+              <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.7}>
+                <Ionicons name="log-out-outline" size={18} color="#FF6B6B" style={{ marginRight: 8 }} />
+                <Text style={styles.logoutText}>Log Out</Text>
+              </TouchableOpacity>
+              <Text style={styles.versionText}>CoreLedger • Ghana Edition</Text>
+            </View>
+          </Animated.View>
+        </View>
       </Modal>
     </>
   );
@@ -162,61 +270,136 @@ function MenuDropdown({ navigation }) {
 
 const styles = StyleSheet.create({
   menuBtn: {
-    marginRight: 16,
-    padding: 6,
+    marginRight: 14,
+    padding: 4,
   },
-  modalOverlay: {
+  menuIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#F3EFEA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
   },
-  menuCard: {
-    position: 'absolute',
-    right: 16,
-    width: 220,
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10, 25, 47, 0.55)',
+  },
+  drawerPanel: {
+    height: '100%',
     backgroundColor: COLORS.navy,
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
+    paddingHorizontal: 18,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
+    shadowOffset: { width: -4, height: 0 },
     shadowOpacity: 0.35,
     shadowRadius: 16,
-    elevation: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    elevation: 20,
+    justifyContent: 'space-between',
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(255, 255, 255, 0.1)',
   },
-  menuItem: {
+  drawerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-    borderRadius: 12,
+    paddingVertical: 10,
   },
-  menuItemActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  shopAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1.5,
+    borderColor: COLORS.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  activeBar: {
-    width: 3,
-    height: 16,
-    borderRadius: 2,
-    backgroundColor: COLORS.gold,
-    position: 'absolute',
-    left: 4,
-  },
-  menuIcon: {
-    marginRight: 12,
-  },
-  menuText: {
-    fontSize: 15,
-    fontWeight: '600',
+  shopName: {
+    fontSize: 16,
+    fontWeight: '800',
     color: '#FFFFFF',
     letterSpacing: 0.2,
   },
-  menuDivider: {
+  shopCategory: {
+    fontSize: 12,
+    color: COLORS.gold,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  userEmail: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
+    marginTop: 2,
+  },
+  closeBtn: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  drawerDivider: {
     height: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    marginVertical: 6,
-    marginHorizontal: 8,
+    marginVertical: 14,
+  },
+  menuList: {
+    flex: 1,
+  },
+  drawerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 13,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    marginBottom: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  iconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  drawerItemText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  drawerItemSub: {
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.5)',
+    marginTop: 2,
+  },
+  bottomSection: {
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  logoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 107, 107, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 107, 0.25)',
+  },
+  logoutText: {
+    color: '#FF6B6B',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  versionText: {
+    textAlign: 'center',
+    fontSize: 10,
+    color: 'rgba(255, 255, 255, 0.35)',
+    marginTop: 10,
   },
   tabItem: {
     alignItems: 'center',
@@ -264,11 +447,8 @@ const styles = StyleSheet.create({
 });
 
 export default function BottomTabNavigator({ navigation }) {
-  const menuRight = () => <MenuDropdown navigation={navigation} />;
+  const menuRight = () => <MenuDrawer navigation={navigation} />;
   const insets = useSafeAreaInsets();
-  // Reserve exactly the device's own home-indicator/gesture-bar inset, plus a
-  // small fixed buffer — a hardcoded per-platform value clips or floats on
-  // devices whose safe area differs (Dynamic Island, gesture nav, etc).
   const tabBarBottomPadding = insets.bottom + 8;
   const tabBarHeight = 52 + tabBarBottomPadding;
 
