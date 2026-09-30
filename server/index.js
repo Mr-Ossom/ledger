@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
 const firebase = require('firebase-admin');
@@ -12,7 +13,7 @@ if (!SVC_ACCOUNT_B64) {
 firebase.initializeApp({
   credential: SVC_ACCOUNT_B64
     ? firebase.credential.cert(JSON.parse(Buffer.from(SVC_ACCOUNT_B64, 'base64').toString('utf8')))
-    : firebase.applicationDefault(),
+    : firebase.credential.applicationDefault(),
 });
 
 const db = firebase.firestore();
@@ -67,9 +68,29 @@ app.use(
 );
 
 /**
+ * Infer the Ghana MoMo provider from a normalized E.164 phone number.
+ * MTN prefixes: 024, 054, 055, 059, 025 → 'mtn'
+ * Vodafone:     020, 050           → 'vod'
+ * AirtelTigo:   027, 057, 026, 056 → 'atl'
+ */
+function inferProvider(e164) {
+  // Strip country code (+233) → get local prefix
+  const local = e164.replace(/^\+233/, '0');
+  if (/^0(24|54|55|59|25)/.test(local)) return 'mtn';
+  if (/^0(20|50)/.test(local)) return 'vod';
+  if (/^0(27|57|26|56)/.test(local)) return 'atl';
+  // Default to MTN (most common in Ghana)
+  return 'mtn';
+}
+
+/**
  * POST /api/initialize
  * Body: { amount, phone, description, category, inventoryItemId, quantityUsed }
  * Auth: Bearer <Firebase ID token> (verifies the logged-in shop owner)
+ *
+ * Uses Paystack's DIRECT Charge API (POST /charge) so the USSD / STK push
+ * goes straight to the buyer's phone — no web checkout URL required.
+ *
  * Returns: { paymentId }
  */
 app.post('/api/initialize', async (req, res) => {
@@ -102,10 +123,12 @@ app.post('/api/initialize', async (req, res) => {
   const amountPesewas = Math.round(amount * 100);
   const reference = `CL-${shopId}-${crypto.randomUUID().slice(0, 12)}`.replace(/[^A-Za-z0-9\-_=.]/g, '_');
   const email = `${phone.replace('+', '')}@coreledger.app`;
+  const provider = inferProvider(phone);
 
-  let initRes;
+  // ---------- Paystack direct charge (sends USSD prompt to buyer's phone) ----------
+  let chargeRes;
   try {
-    initRes = await fetch(`${PAYSTACK_BASE}/transaction/initialize`, {
+    chargeRes = await fetch(`${PAYSTACK_BASE}/charge`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
@@ -116,28 +139,42 @@ app.post('/api/initialize', async (req, res) => {
         email,
         currency: 'GHS',
         reference,
-        channels: ['mobile_money'],
-        metadata: JSON.stringify({
+        mobile_money: {
+          phone,         // E.164 buyer number (e.g. "+233241234567")
+          provider,      // 'mtn' | 'vod' | 'atl'
+        },
+        metadata: {
           custom_fields: [
             { display_name: 'Buyer Phone', variable_name: 'phone', value: phone },
             { display_name: 'Shop ID', variable_name: 'shop_id', value: shopId },
+            { display_name: 'Description', variable_name: 'description', value: description },
             { display_name: 'App', variable_name: 'app', value: 'CoreLedger' },
           ],
-        }),
+        },
       }),
     });
   } catch (e) {
-    console.error('Paystack initialize error', e.message);
+    console.error('Paystack charge error', e.message);
     return res.status(502).json({ error: 'Could not reach Paystack. Please try again.' });
   }
 
-  const paystackData = await initRes.json().catch(() => ({}));
-  if (!initRes.ok || !paystackData.status || !paystackData.data) {
-    const msg = paystackData.message || 'Paystack could not start the payment.';
-    console.error('Paystack error', msg);
+  const chargeData = await chargeRes.json().catch(() => ({}));
+  console.log('Paystack /charge response', JSON.stringify(chargeData));
+
+  // Paystack returns status=true and data.status in:
+  //   'send_otp' | 'send_pin' | 'pay_offline' | 'pending' | 'success' | 'failed'
+  if (!chargeRes.ok || !chargeData.status) {
+    const msg = chargeData.message || 'Paystack could not start the payment.';
+    console.error('Paystack charge failed', msg);
     return res.status(502).json({ error: msg });
   }
 
+  const dataStatus = chargeData.data?.status;
+  if (dataStatus === 'failed') {
+    return res.status(400).json({ error: chargeData.data?.display_text || 'Payment was declined. Please try again.' });
+  }
+
+  // ---------- Persist to Firestore ----------
   const payRef = db.collection('payments').doc();
   await payRef.set({
     ownerId: uid,
@@ -149,15 +186,51 @@ app.post('/api/initialize', async (req, res) => {
     payment_method: 'MoMo',
     inventoryItemId: body.inventoryItemId || null,
     quantityUsed: Number(body.quantityUsed) || 0,
-    status: 'pending',
+    // 'pending' until webhook fires (charge.success / charge.failed)
+    status: dataStatus === 'success' ? 'completed' : 'pending',
     paystackRef: reference,
-    paystackAccessCode: paystackData.data.access_code || null,
+    paystackChargeStatus: dataStatus,   // raw Paystack status for debugging
     channel: 'mobile_money',
+    provider,
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
   });
 
-  res.json({ paymentId: payRef.id });
+  // 'pay_offline' / 'pending' → buyer will get USSD push; we just wait for the webhook
+  // 'send_otp' / 'send_pin' → rare for Ghana MoMo; caller can ignore or prompt
+  res.json({ paymentId: payRef.id, chargeStatus: dataStatus });
+});
+
+/**
+ * POST /api/charge-submit
+ * Body: { reference, otp }
+ * Used if Paystack returns status='send_otp' or 'send_pin' — forwards the
+ * buyer-entered code to Paystack to complete the charge.
+ * Auth: Bearer <Firebase ID token>
+ */
+app.post('/api/charge-submit', async (req, res) => {
+  const decoded = await requireAuth(req, res);
+  if (!decoded) return;
+  const { reference, otp } = req.body || {};
+  if (!reference || !otp) return deny(res, 'reference and otp are required.');
+
+  let submitRes;
+  try {
+    submitRes = await fetch(`${PAYSTACK_BASE}/charge/submit_otp`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ reference, otp }),
+    });
+  } catch (e) {
+    return res.status(502).json({ error: 'Could not reach Paystack.' });
+  }
+
+  const data = await submitRes.json().catch(() => ({}));
+  if (!submitRes.ok) return res.status(502).json({ error: data.message || 'OTP submit failed.' });
+  res.json(data);
 });
 
 /**
