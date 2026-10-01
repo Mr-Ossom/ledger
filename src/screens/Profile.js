@@ -1,10 +1,10 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Share } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import Select from '../components/Select';
 import { useFocusEffect } from '@react-navigation/native';
 import { COLORS, STRINGS, SHOP_CATEGORIES } from '../constants';
 import { getShop, updateShop, getTransactions, getDailyProfit } from '../database';
-import { toCSV } from '../utils/csv';
+import { exportToPDF } from '../utils/pdf';
 import { useAuth } from '../context/AuthContext';
 import { generateInsight } from '../utils/claude';
 
@@ -60,10 +60,15 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
-  const exportCSV = async () => {
-    const txs = await getTransactions({});
-    const csv = toCSV(txs);
-    try { await Share.share({ message: csv, title: 'Ledger Export' }); } catch { Alert.alert(t.exported, csv.slice(0, 400) + '...'); }
+  const exportPDF = async () => {
+    try {
+      const txs = await getTransactions({});
+      if (!txs || txs.length === 0) { Alert.alert('No Data', 'No transactions to export.'); return; }
+      const shop = await getShop();
+      await exportToPDF(txs, shop?.name || 'My Shop');
+    } catch (err) {
+      Alert.alert('Export Failed', err?.message || 'Could not generate PDF.');
+    }
   };
 
   return (
@@ -101,8 +106,8 @@ export default function ProfileScreen({ navigation }) {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Data</Text>
-        <TouchableOpacity style={[styles.primary, { backgroundColor: COLORS.navy }]} onPress={exportCSV}><Text style={[styles.primaryText, { color: COLORS.cream }]}>{t.exportCSV}</Text></TouchableOpacity>
-        <Text style={styles.hint}>Exports all transactions as CSV for sharing via WhatsApp / email.</Text>
+        <TouchableOpacity style={[styles.primary, { backgroundColor: COLORS.navy }]} onPress={exportPDF}><Text style={[styles.primaryText, { color: COLORS.cream }]}>Export as PDF</Text></TouchableOpacity>
+        <Text style={styles.hint}>Exports all transactions as a branded PDF report for sharing via WhatsApp / email.</Text>
       </View>
 
       <TouchableOpacity style={styles.signOut} onPress={async () => { await signOut(); navigation.replace('Onboarding'); }}><Text style={styles.signOutText}>{t.signOut}</Text></TouchableOpacity>
