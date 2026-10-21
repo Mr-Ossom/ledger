@@ -7,6 +7,13 @@ import { generateInsight } from '../utils/claude';
 
 const t = STRINGS.en;
 
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return t.homeGreeting.morning;
+  if (hour < 17) return t.homeGreeting.afternoon;
+  return t.homeGreeting.evening;
+}
+
 function Money({ value, color }) {
   return <Text style={[styles.money, { color: color || COLORS.navy }]}>GHS {Number(value).toFixed(2)}</Text>;
 }
@@ -56,8 +63,8 @@ export default function HomeScreen({ navigation }) {
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 24 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.navy} />}>
       <View style={styles.greetingBox}>
-        <Text style={styles.greeting}>{t.homeGreeting}, {shop?.name?.split(' ')[0] || 'Ama'} 👋</Text>
-        <Text style={styles.shopLine}>{shop?.name || "Ama's Provisions"} • {shop?.category || 'Provisions'}</Text>
+        <Text style={styles.greeting}>{getGreeting()}{shop?.name ? `, ${shop.name.split(' ')[0]}` : ''} 👋</Text>
+        {shop?.name ? <Text style={styles.shopLine}>{shop.name}{shop.category ? ` • ${shop.category}` : ''}</Text> : null}
       </View>
 
       <View style={styles.totalsGrid}>

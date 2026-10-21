@@ -83,7 +83,7 @@ export async function updateShop({ name, category, phone, daily_target }) {
   fallbackShop = { id: 1, name: name.trim() || 'My Shop', category, phone, daily_target: target, created_at: new Date().toISOString() };
 }
 
-export async function addTransaction({ type, amount, description, category, payment_method, is_credit, inventoryItemId, quantityUsed, payment_status, payment_reference }) {
+export async function addTransaction({ type, amount, description, category, payment_method, is_credit, buyer_name, buyer_phone, inventoryItemId, quantityUsed, payment_status, payment_reference }) {
   const tx = {
     type,
     amount,
@@ -91,6 +91,8 @@ export async function addTransaction({ type, amount, description, category, paym
     category,
     payment_method: payment_method || null,
     is_credit: is_credit ? 1 : 0,
+    buyer_name: buyer_name || null,
+    buyer_phone: buyer_phone || null,
     payment_status: payment_status || null,
     payment_reference: payment_reference || null,
     created_at: new Date().toISOString(),
@@ -137,6 +139,9 @@ export async function getTransactions({ type, search, dateFilter } = {}) {
           category: v.category,
           payment_method: v.payment_method,
           is_credit: v.is_credit,
+          buyer_name: v.buyer_name || null,
+          buyer_phone: v.buyer_phone || null,
+          credit_paid: v.credit_paid || 0,
           payment_status: v.payment_status,
           payment_reference: v.payment_reference,
           created_at: v.createdAt?.toDate?.()?.toISOString?.() || v.created_at || new Date().toISOString(),
@@ -217,6 +222,22 @@ export async function clearAll() {
     }
   }
 }
+
+export async function updateTransaction(id, fields) {
+  // Update fallback
+  const idx = fallbackTx.findIndex(t => t.id === id);
+  if (idx !== -1) fallbackTx[idx] = { ...fallbackTx[idx], ...fields };
+  const uid = await getAuthUid();
+  if (uid && isFirebaseConfigured()) {
+    try {
+      await updateDoc(doc(db, 'transactions', id), { ...fields, updatedAt: serverTimestamp() });
+    } catch (err) {
+      console.error('[Firestore updateTransaction Error]:', err);
+      throw err;
+    }
+  }
+}
+
 export function getDb() { return null; }
 
 // ── Inventory ────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, STRINGS, SALE_CATEGORIES, PAYMENT_METHODS } from '../constants';
 import { addTransaction, getInventory } from '../database';
 import { parseTransactionText } from '../utils/claude';
-import { startRecording, stopRecording, transcribeAudio } from '../utils/speech';
+
 import { initializePayment, submitPaymentOtp, watchPayment, formatPhone } from '../lib/payments';
 
 const t = STRINGS.en;
@@ -15,8 +15,12 @@ export default function AddSaleScreen({ navigation }) {
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('Groceries');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
-  const [recording, setRecording] = useState(false);
+
   const [parsing, setParsing] = useState(false);
+
+  // Credit buyer info
+  const [creditBuyerName, setCreditBuyerName] = useState('');
+  const [creditBuyerPhone, setCreditBuyerPhone] = useState('');
 
   // Inventory linking
   const [inventory, setInventory] = useState([]);
@@ -36,7 +40,7 @@ export default function AddSaleScreen({ navigation }) {
   const payResolved = useRef(false);
 
   useEffect(() => {
-    getInventory().then(setInventory).catch(() => {});
+    getInventory().then(setInventory).catch(() => { });
     return () => {
       if (payUnsub.current) { payUnsub.current(); payUnsub.current = null; }
     };
@@ -67,6 +71,10 @@ export default function AddSaleScreen({ navigation }) {
     if (!val || val <= 0) { Alert.alert('Enter a valid amount'); return; }
     if (!description.trim()) { Alert.alert('Enter a description'); return; }
     if (paymentMethod === 'MoMo') { handleMoMoPayment(val); return; }
+    if (paymentMethod === 'Credit') {
+      if (!creditBuyerName.trim()) { Alert.alert('Buyer name required', 'Please enter the buyer\'s name for credit sales.'); return; }
+      if (!creditBuyerPhone.trim()) { Alert.alert('Buyer phone required', 'Please enter the buyer\'s phone number for credit sales.'); return; }
+    }
     try {
       await addTransaction({
         type: 'sale',
@@ -75,6 +83,8 @@ export default function AddSaleScreen({ navigation }) {
         category,
         payment_method: paymentMethod,
         is_credit: paymentMethod === 'Credit' ? 1 : 0,
+        buyer_name: paymentMethod === 'Credit' ? creditBuyerName.trim() : null,
+        buyer_phone: paymentMethod === 'Credit' ? creditBuyerPhone.trim() : null,
         inventoryItemId: selectedItem?.id || null,
         quantityUsed: selectedItem ? (parseFloat(quantityUsed) || 1) : 0,
       });
@@ -173,25 +183,6 @@ export default function AddSaleScreen({ navigation }) {
       Alert.alert('Verification Failed', e?.message || 'Could not verify code. Please try again.');
       setPayStep('otp');
     }
-  };
-
-  const handleVoice = async () => {
-    if (recording) {
-      setRecording(false);
-      const uri = await stopRecording();
-      const text = await transcribeAudio(uri);
-      await applyParsed(text);
-      return;
-    }
-    const ok = await startRecording();
-    if (!ok) { const text = '47.50 for milo and bread'; await applyParsed(text); return; }
-    setRecording(true);
-    setTimeout(async () => {
-      setRecording(false);
-      await stopRecording();
-      const text = await transcribeAudio(null);
-      await applyParsed(text);
-    }, 1800);
   };
 
   const applyParsed = async (text) => {
@@ -322,9 +313,31 @@ export default function AddSaleScreen({ navigation }) {
           </View>
         )}
 
-        <TouchableOpacity style={[styles.mic, recording && styles.micActive]} onPress={handleVoice}>
-          <Text style={styles.micText}>{recording ? '● Recording… tap to stop' : '🎙️ Tap to speak: "47.50 for milo and bread"'}</Text>
-        </TouchableOpacity>
+        {paymentMethod === 'Credit' && (
+          <View style={styles.creditBox}>
+            <Text style={styles.creditBoxTitle}>📋 Buyer Details (Credit)</Text>
+            <Text style={styles.label}>BUYER NAME</Text>
+            <TextInput
+              style={styles.input}
+              value={creditBuyerName}
+              onChangeText={setCreditBuyerName}
+              placeholder="e.g. Ama Serwaa"
+              placeholderTextColor={COLORS.muted}
+            />
+            <Text style={styles.label}>BUYER PHONE</Text>
+            <TextInput
+              style={styles.input}
+              value={creditBuyerPhone}
+              onChangeText={setCreditBuyerPhone}
+              placeholder="e.g. 024 123 4567"
+              keyboardType="phone-pad"
+              placeholderTextColor={COLORS.muted}
+            />
+            <Text style={styles.momoHint}>This will be saved so you can follow up for payment.</Text>
+          </View>
+        )}
+
+
 
         <TouchableOpacity
           style={[styles.primary, payStatus === 'pending' && styles.primaryDisabled]}
@@ -466,9 +479,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: COLORS.white, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: COLORS.lightGray },
   input: { height: 52, borderWidth: 1.5, borderColor: COLORS.navy, borderRadius: 12, paddingHorizontal: 14, fontSize: 15, color: COLORS.navy, backgroundColor: COLORS.white },
   parsingText: { fontSize: 12, color: COLORS.gold, fontWeight: '700', marginTop: 4 },
-  mic: { marginTop: 16, padding: 14, borderRadius: 12, backgroundColor: '#F0EAE1', alignItems: 'center' },
-  micActive: { backgroundColor: '#FCE4E4' },
-  micText: { color: COLORS.navy, fontWeight: '700', fontSize: 13 },
+
   primary: { marginTop: 16, backgroundColor: COLORS.navy, height: 54, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
   primaryDisabled: { opacity: 0.6 },
   primaryText: { color: COLORS.white, fontWeight: '800', fontSize: 16 },
@@ -481,6 +492,8 @@ const styles = StyleSheet.create({
   pillText: { fontWeight: '700', fontSize: 13, color: COLORS.navy },
   pillTextActive: { color: COLORS.white },
   momoHint: { fontSize: 12, color: COLORS.muted, marginTop: 6, lineHeight: 17 },
+  creditBox: { marginTop: 14, backgroundColor: '#FFF8F0', borderWidth: 1.5, borderColor: COLORS.rust, borderRadius: 14, padding: 14 },
+  creditBoxTitle: { fontWeight: '800', color: COLORS.rust, fontSize: 13, marginBottom: 2 },
   payOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 24 },
   payCard: { backgroundColor: COLORS.white, borderRadius: 20, padding: 28, alignItems: 'center', width: '100%', maxWidth: 340, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 12, elevation: 8 },
   payTitle: { fontSize: 18, fontWeight: '900', color: COLORS.navy, marginTop: 12, textAlign: 'center' },
