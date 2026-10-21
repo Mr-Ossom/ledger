@@ -10,12 +10,19 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.coreledger.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#1B2E4A",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -29,13 +36,19 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/android-icon-foreground.png",
-          "imageWidth": 180,
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#050E1F"
+          "backgroundColor": "#1B2E4A"
         }
       ],
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "32d5a382-b552-4ff7-8f19-c178d17ab779"
+      }
+    },
+    "owner": "josh_motions"
   }
 }
