@@ -42,7 +42,8 @@
           "backgroundColor": "#1B2E4A"
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-sharing"
     ],
     "extra": {
       "eas": {

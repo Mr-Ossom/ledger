@@ -24,8 +24,7 @@ export default function AddSaleScreen({ navigation }) {
 
   // Inventory linking
   const [inventory, setInventory] = useState([]);
-  const [selectedItem, setSelectedItem] = useState(null); // { id, name, sellingPrice, unit }
-  const [quantityUsed, setQuantityUsed] = useState('1');
+  const [cart, setCart] = useState([]);
   const [inventoryModalVisible, setInventoryModalVisible] = useState(false);
   const [inventorySearch, setInventorySearch] = useState('');
 
@@ -50,21 +49,41 @@ export default function AddSaleScreen({ navigation }) {
     i.name.toLowerCase().includes(inventorySearch.toLowerCase())
   );
 
-  const selectInventoryItem = (item) => {
-    setSelectedItem(item);
-    setDescription(item.name);
-    const qty = parseFloat(quantityUsed) || 1;
-    setAmount(String((item.sellingPrice * qty).toFixed(2)));
+  const cartTotal = cart.reduce((sum, c) => sum + c.sellingPrice * c.qty, 0);
+  const cartDescription = cart.map(c => `${c.name} x${c.qty}`).join(', ');
+
+  const addToCart = (item) => {
+    setCart(prev => {
+      const existing = prev.find(c => c.id === item.id);
+      if (existing) {
+        return prev.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c);
+      }
+      return [...prev, { ...item, qty: 1 }];
+    });
     setInventoryModalVisible(false);
   };
 
-  const handleQtyChange = (v) => {
-    setQuantityUsed(v);
-    if (selectedItem) {
-      const qty = parseFloat(v) || 1;
-      setAmount(String((selectedItem.sellingPrice * qty).toFixed(2)));
+  const updateCartQty = (itemId, newQty) => {
+    const q = parseFloat(newQty);
+    if (!q || q <= 0) {
+      setCart(prev => prev.filter(c => c.id !== itemId));
+      return;
     }
+    setCart(prev => prev.map(c => c.id === itemId ? { ...c, qty: q } : c));
   };
+
+  const removeFromCart = (itemId) => {
+    setCart(prev => prev.filter(c => c.id !== itemId));
+  };
+
+  useEffect(() => {
+    if (cart.length > 0) {
+      const total = cart.reduce((sum, c) => sum + c.sellingPrice * c.qty, 0);
+      const desc = cart.map(c => `${c.name} x${c.qty}`).join(', ');
+      setAmount(String(total.toFixed(2)));
+      setDescription(desc);
+    }
+  }, [cart]);
 
   const save = async () => {
     const val = parseFloat(amount);
@@ -85,8 +104,9 @@ export default function AddSaleScreen({ navigation }) {
         is_credit: paymentMethod === 'Credit' ? 1 : 0,
         buyer_name: paymentMethod === 'Credit' ? creditBuyerName.trim() : null,
         buyer_phone: paymentMethod === 'Credit' ? creditBuyerPhone.trim() : null,
-        inventoryItemId: selectedItem?.id || null,
-        quantityUsed: selectedItem ? (parseFloat(quantityUsed) || 1) : 0,
+        inventoryItemId: cart.length === 1 ? cart[0].id : null,
+        quantityUsed: cart.length === 1 ? cart[0].qty : 0,
+        cartItems: cart.length > 0 ? cart.map(c => ({ id: c.id, name: c.name, qty: c.qty, unitPrice: c.sellingPrice })) : null,
       });
       navigation.goBack();
     } catch (err) {
@@ -107,8 +127,9 @@ export default function AddSaleScreen({ navigation }) {
         phone: buyerPhone.trim(),
         description: description.trim(),
         category,
-        inventoryItemId: selectedItem?.id || null,
-        quantityUsed: selectedItem ? (parseFloat(quantityUsed) || 1) : 0,
+        inventoryItemId: cart.length === 1 ? cart[0].id : null,
+        quantityUsed: cart.length === 1 ? cart[0].qty : 0,
+        cartItems: cart.length > 0 ? cart.map(c => ({ id: c.id, name: c.name, qty: c.qty, unitPrice: c.sellingPrice })) : null,
       });
 
       setPayRefCode(paymentInfo.reference);
@@ -134,8 +155,9 @@ export default function AddSaleScreen({ navigation }) {
               category: p.category || category,
               payment_method: 'MoMo',
               is_credit: 0,
-              inventoryItemId: p.inventoryItemId || selectedItem?.id || null,
-              quantityUsed: p.quantityUsed || (selectedItem ? (parseFloat(quantityUsed) || 1) : 0),
+              inventoryItemId: p.inventoryItemId || (cart.length === 1 ? cart[0].id : null),
+              quantityUsed: p.quantityUsed || (cart.length === 1 ? cart[0].qty : 0),
+              cartItems: cart.length > 0 ? cart.map(c => ({ id: c.id, name: c.name, qty: c.qty, unitPrice: c.sellingPrice })) : null,
               payment_status: 'completed',
               payment_reference: p.paystackRef || paymentInfo.reference,
             });
@@ -223,34 +245,60 @@ export default function AddSaleScreen({ navigation }) {
       </View>
 
       <View style={styles.card}>
-        {/* Inventory Item Picker Button */}
-        <Text style={styles.label}>LINK INVENTORY ITEM (OPTIONAL)</Text>
+        {/* Inventory Items Cart */}
+        <Text style={styles.label}>INVENTORY ITEMS (OPTIONAL)</Text>
         <TouchableOpacity
           style={styles.inventoryPickerBtn}
           onPress={() => setInventoryModalVisible(true)}
         >
-          <Ionicons name="cube-outline" size={18} color={selectedItem ? COLORS.navy : COLORS.muted} style={{ marginRight: 8 }} />
-          <Text style={[styles.inventoryPickerText, selectedItem && { color: COLORS.navy, fontWeight: '700' }]}>
-            {selectedItem ? `${selectedItem.name} (Stock: ${selectedItem.quantity} ${selectedItem.unit})` : 'Select from inventory…'}
+          <Ionicons name="add-circle-outline" size={18} color={COLORS.navy} style={{ marginRight: 8 }} />
+          <Text style={[styles.inventoryPickerText, { color: COLORS.navy }]}>
+            Add item from inventory…
           </Text>
-          {selectedItem && (
-            <TouchableOpacity onPress={() => setSelectedItem(null)} style={{ padding: 4 }}>
-              <Ionicons name="close-circle" size={18} color={COLORS.muted} />
-            </TouchableOpacity>
-          )}
         </TouchableOpacity>
 
-        {selectedItem && (
-          <View style={styles.qtyRow}>
-            <Text style={[styles.label, { marginTop: 8 }]}>QUANTITY SOLD ({selectedItem.unit})</Text>
-            <TextInput
-              style={styles.qtyInput}
-              value={quantityUsed}
-              onChangeText={handleQtyChange}
-              keyboardType="decimal-pad"
-              placeholder="1"
-              placeholderTextColor={COLORS.muted}
-            />
+        {cart.length > 0 && (
+          <View style={styles.cartList}>
+            {cart.map((cartItem) => (
+              <View key={cartItem.id} style={styles.cartRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cartItemName}>{cartItem.name}</Text>
+                  <Text style={styles.cartItemPrice}>
+                    GHS {Number(cartItem.sellingPrice).toFixed(2)}/{cartItem.unit}
+                  </Text>
+                </View>
+                <View style={styles.qtyControls}>
+                  <TouchableOpacity
+                    style={styles.qtyBtn}
+                    onPress={() => updateCartQty(cartItem.id, cartItem.qty - 1)}
+                  >
+                    <Text style={styles.qtyBtnText}>−</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    style={styles.cartQtyInput}
+                    value={String(cartItem.qty)}
+                    onChangeText={(v) => updateCartQty(cartItem.id, parseFloat(v) || 0)}
+                    keyboardType="decimal-pad"
+                  />
+                  <TouchableOpacity
+                    style={styles.qtyBtn}
+                    onPress={() => updateCartQty(cartItem.id, cartItem.qty + 1)}
+                  >
+                    <Text style={styles.qtyBtnText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.cartSubtotal}>
+                  {(cartItem.sellingPrice * cartItem.qty).toFixed(2)}
+                </Text>
+                <TouchableOpacity onPress={() => removeFromCart(cartItem.id)} style={{ padding: 4 }}>
+                  <Ionicons name="close-circle" size={18} color={COLORS.muted} />
+                </TouchableOpacity>
+              </View>
+            ))}
+            <View style={styles.cartTotalRow}>
+              <Text style={styles.cartTotalLabel}>Cart Total</Text>
+              <Text style={styles.cartTotalValue}>GHS {cartTotal.toFixed(2)}</Text>
+            </View>
           </View>
         )}
 
@@ -376,13 +424,18 @@ export default function AddSaleScreen({ navigation }) {
             data={filteredInventory}
             keyExtractor={i => i.id}
             renderItem={({ item }) => (
-              <TouchableOpacity style={styles.inventoryRow} onPress={() => selectInventoryItem(item)}>
+              <TouchableOpacity style={styles.inventoryRow} onPress={() => addToCart(item)}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontWeight: '700', color: COLORS.navy }}>{item.name}</Text>
                   <Text style={{ color: COLORS.muted, fontSize: 12, marginTop: 2 }}>
                     {item.quantity} {item.unit} in stock • GHS {Number(item.sellingPrice).toFixed(2)}/unit
                   </Text>
                 </View>
+                {cart.find(c => c.id === item.id) && (
+                  <View style={styles.cartBadge}>
+                    <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 12 }}>×{cart.find(c => c.id === item.id).qty}</Text>
+                  </View>
+                )}
                 <View style={[styles.qtyBadge, { backgroundColor: item.quantity <= item.lowStockThreshold ? '#D9940A' : COLORS.teal }]}>
                   <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 12 }}>{item.quantity} {item.unit}</Text>
                 </View>
@@ -516,4 +569,17 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.white, borderRadius: 10, paddingHorizontal: 12, height: 40, marginBottom: 12, borderWidth: 1, borderColor: COLORS.lightGray },
   inventoryRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.lightGray },
   qtyBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  cartList: { marginTop: 10, backgroundColor: '#FAF8F5', borderRadius: 12, borderWidth: 1, borderColor: COLORS.lightGray, overflow: 'hidden' },
+  cartRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: COLORS.lightGray, gap: 8 },
+  cartItemName: { fontWeight: '700', color: COLORS.navy, fontSize: 13 },
+  cartItemPrice: { color: COLORS.muted, fontSize: 11, marginTop: 1 },
+  qtyControls: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  qtyBtn: { width: 30, height: 30, borderRadius: 8, backgroundColor: COLORS.navy, alignItems: 'center', justifyContent: 'center' },
+  qtyBtnText: { color: COLORS.white, fontWeight: '900', fontSize: 16 },
+  cartQtyInput: { width: 40, height: 30, textAlign: 'center', fontWeight: '700', color: COLORS.navy, fontSize: 14, borderWidth: 1, borderColor: COLORS.lightGray, borderRadius: 6, backgroundColor: COLORS.white },
+  cartSubtotal: { fontWeight: '800', color: COLORS.navy, fontSize: 13, fontFamily: 'monospace', minWidth: 60, textAlign: 'right' },
+  cartTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 12, backgroundColor: COLORS.navy, borderBottomLeftRadius: 12, borderBottomRightRadius: 12 },
+  cartTotalLabel: { color: COLORS.cream, fontWeight: '800', fontSize: 13 },
+  cartTotalValue: { color: COLORS.gold, fontWeight: '900', fontSize: 16, fontFamily: 'monospace' },
+  cartBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: COLORS.teal, marginRight: 6 },
 });

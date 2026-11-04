@@ -83,7 +83,7 @@ export async function updateShop({ name, category, phone, daily_target }) {
   fallbackShop = { id: 1, name: name.trim() || 'My Shop', category, phone, daily_target: target, created_at: new Date().toISOString() };
 }
 
-export async function addTransaction({ type, amount, description, category, payment_method, is_credit, buyer_name, buyer_phone, inventoryItemId, quantityUsed, payment_status, payment_reference }) {
+export async function addTransaction({ type, amount, description, category, payment_method, is_credit, buyer_name, buyer_phone, inventoryItemId, quantityUsed, payment_status, payment_reference, cartItems }) {
   const tx = {
     type,
     amount,
@@ -103,16 +103,31 @@ export async function addTransaction({ type, amount, description, category, paym
     try {
       const shop = await getShop();
       const shopId = shop?.id || 'none';
-      await addDoc(collection(db, 'transactions'), { ...tx, shopId, ownerId: uid, createdAt: serverTimestamp() });
-      // Auto-deduct inventory if an item was linked
-      if (type === 'sale' && inventoryItemId && quantityUsed > 0) {
-        try {
-          await updateDoc(doc(db, 'inventory', inventoryItemId), {
-            quantity: increment(-quantityUsed),
-            updatedAt: serverTimestamp(),
-          });
-        } catch (invErr) {
-          console.error('[Firestore inventory deduct Error]:', invErr);
+      await addDoc(collection(db, 'transactions'), { ...tx, shopId, ownerId: uid, cartItems: cartItems || null, createdAt: serverTimestamp() });
+      // Auto-deduct inventory — multi-item cart or single item
+      if (type === 'sale') {
+        if (cartItems && cartItems.length > 0) {
+          for (const ci of cartItems) {
+            if (ci.id && ci.qty > 0) {
+              try {
+                await updateDoc(doc(db, 'inventory', ci.id), {
+                  quantity: increment(-ci.qty),
+                  updatedAt: serverTimestamp(),
+                });
+              } catch (invErr) {
+                console.error('[Firestore inventory deduct Error]:', invErr, ci);
+              }
+            }
+          }
+        } else if (inventoryItemId && quantityUsed > 0) {
+          try {
+            await updateDoc(doc(db, 'inventory', inventoryItemId), {
+              quantity: increment(-quantityUsed),
+              updatedAt: serverTimestamp(),
+            });
+          } catch (invErr) {
+            console.error('[Firestore inventory deduct Error]:', invErr);
+          }
         }
       }
     } catch (err) {
